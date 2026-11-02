@@ -213,7 +213,7 @@ func TestRunHelpExitsZero(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"run", "--help"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "usage: ksbx run") || !strings.Contains(out.String(), "shell") {
+	if !strings.Contains(out.String(), "usage: qsbx run") || !strings.Contains(out.String(), "shell") {
 		t.Fatalf("unexpected help: %q", out.String())
 	}
 }
@@ -297,7 +297,7 @@ func TestRunUnknownFlagUsesSharedErrorContract(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"run", "--bogus", "shell", "."}); code != 1 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") || !strings.Contains(stderr.String(), "  try: ksbx run --help") {
+	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") || !strings.Contains(stderr.String(), "  try: qsbx run --help") {
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 }

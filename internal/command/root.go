@@ -37,7 +37,7 @@ const (
 	reasonDefaultDeny = "default deny"
 )
 
-const createUsage = `usage: ksbx create [AGENT] [PATH...] [--name NAME] [flags]
+const createUsage = `usage: qsbx create [AGENT] [PATH...] [--name NAME] [flags]
 
 Create a sandbox for an agent. The default image is daemon-configured; only the
 shell agent is implemented. Omit PATH for no workspace mount.
@@ -61,13 +61,13 @@ Flags:
   --env-file FILE             read environment overrides from a file (repeatable)
 `
 
-const removeUsage = `usage: ksbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all
+const removeUsage = `usage: qsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all
 
 Remove one or more sandboxes. --force skips confirmation and allows removal of
 a running sandbox. --all removes every sandbox.
 `
 
-const pruneUsage = `usage: ksbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
+const pruneUsage = `usage: qsbx prune [--dry-run] [-f|--force] [--filter until=TIMESTAMP] [--format table|json|yaml]
 
 Remove stopped sandboxes. --dry-run lists candidates without removing them;
 --force skips confirmation.
@@ -100,7 +100,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // Run executes the command tree and returns a process exit code.
 func (r *Runner) Run(ctx context.Context, args []string) int {
-	global := flag.NewFlagSet("ksbx", flag.ContinueOnError)
+	global := flag.NewFlagSet("qsbx", flag.ContinueOnError)
 	global.SetOutput(io.Discard)
 	socket := global.String("socket", r.Socket, "daemon unix socket")
 	if err := global.Parse(args); err != nil {
@@ -153,10 +153,10 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 func (r *Runner) flagParseFailure(cmdPath string, err error) int {
 	message := err.Error()
 	if name, ok := strings.CutPrefix(message, "flag provided but not defined: -"); ok {
-		_, _ = fmt.Fprintf(r.Err, "error: unknown flag: --%s\n  try: ksbx %s--help\n", name, commandHintPath(cmdPath))
+		_, _ = fmt.Fprintf(r.Err, "error: unknown flag: --%s\n  try: qsbx %s--help\n", name, commandHintPath(cmdPath))
 		return 1
 	}
-	_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: ksbx %s--help\n", message, commandHintPath(cmdPath))
+	_, _ = fmt.Fprintf(r.Err, "error: %s\n  try: qsbx %s--help\n", message, commandHintPath(cmdPath))
 	return 2
 }
 
@@ -215,7 +215,7 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "usage: ksbx login [--status | --username USER --password-stdin]")
+		_, _ = fmt.Fprintln(fs.Output(), "usage: qsbx login [--status | --username USER --password-stdin]")
 		_, _ = fmt.Fprintln(fs.Output(), "Without flags, complete Docker device authorization in your browser.")
 		fs.PrintDefaults()
 	}
@@ -229,7 +229,7 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 		return r.flagParseFailure("login", err)
 	}
 	if fs.NArg() != 0 || (*showStatus && (*username != "" || *passwordStdin)) || (!*showStatus && (*username == "") != !*passwordStdin) {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx login [--status | --username USER --password-stdin]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx login [--status | --username USER --password-stdin]")
 		return 2
 	}
 	return r.performAccountLogin(ctx, *username, *passwordStdin, *showStatus)
@@ -351,7 +351,7 @@ func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 		return r.flagParseFailure("logout", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx logout [--force]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx logout [--force]")
 		return 2
 	}
 	if !*force {
@@ -468,12 +468,12 @@ func (r *Runner) stopSandbox(ctx context.Context, client sdk.Client, sandbox *sd
 
 func (r *Runner) secret(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx secret <set|rm> [flags]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret <set|rm> [flags]")
 		return 2
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprintln(r.Out, "usage: ksbx secret <set|ls|rm> [flags]")
+		_, _ = fmt.Fprintln(r.Out, "usage: qsbx secret <set|ls|rm> [flags]")
 		_, _ = fmt.Fprintln(r.Out, "commands: ls, set, rm (service secrets and registry credentials)")
 		return 0
 	case commandSet:
@@ -536,7 +536,7 @@ func (r *Runner) unsupportedFamily(name string) int {
 		"setup":  "host setup is not implemented",
 		"skills": "skills management is not implemented",
 	}
-	_, _ = fmt.Fprintf(r.Err, "ksbx %s: unsupported: %s\n", name, reasons[name])
+	_, _ = fmt.Fprintf(r.Err, "qsbx %s: unsupported: %s\n", name, reasons[name])
 	return 1
 }
 
@@ -565,7 +565,7 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 		return r.flagParseFailure("secret rm", err)
 	}
 	if fs.NArg() != 0 || *registry == "" || *allSandboxes && *sandboxName != "" {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx secret rm [--registry HOST] [--all-sandboxes | --sandbox NAME]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret rm [--registry HOST] [--all-sandboxes | --sandbox NAME]")
 		return 2
 	}
 	scope := sdk.RegistryScopeHostOnly
@@ -607,7 +607,7 @@ func (r *Runner) registrySet(ctx context.Context, args []string) int {
 		return code
 	}
 	if !validRegistryArguments(fs.NArg(), *registry) {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx secret set [--registry HOST] --username USER [--password-stdin] [--all-sandboxes | --sandbox NAME]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret set [--registry HOST] --username USER [--password-stdin] [--all-sandboxes | --sandbox NAME]")
 		return 2
 	}
 	if *allSandboxes && *sandboxName != "" {
@@ -857,7 +857,7 @@ func formatMemoryMiB(mib uint32) string {
 
 func parseCreatePositionals(positionals []string, nameFlag string) (string, string, []string, error) {
 	if len(positionals) == 0 {
-		return "", "", nil, errors.New("usage: ksbx create [AGENT] [PATH...] [--name NAME] [--cpus N] [--memory SIZE] [--image REF]")
+		return "", "", nil, errors.New("usage: qsbx create [AGENT] [PATH...] [--name NAME] [--cpus N] [--memory SIZE] [--image REF]")
 	}
 	agent := ""
 	paths := []string(nil)
@@ -867,7 +867,7 @@ func parseCreatePositionals(positionals []string, nameFlag string) (string, stri
 		paths = positionals[1:]
 	} else {
 		if name != "" {
-			return "", "", nil, errors.New("--name requires an agent argument (for example: ksbx create --name dev shell PATH)")
+			return "", "", nil, errors.New("--name requires an agent argument (for example: qsbx create --name dev shell PATH)")
 		}
 		name = positionals[0]
 		paths = positionals[1:]
@@ -1003,7 +1003,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 
 func (r *Runner) get(ctx context.Context, args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx get <id>")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx get <id>")
 		return 2
 	}
 	client, err := r.client()
@@ -1048,7 +1048,7 @@ func (r *Runner) remove(ctx context.Context, args []string) int {
 		return 0
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "ksbx rm: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "qsbx rm: %v\n", err)
 		return 2
 	}
 	client, err := r.client()
@@ -1132,7 +1132,7 @@ func parseRemoveOptions(args []string) (removeOptions, bool, error) {
 		return removeOptions{}, false, err
 	}
 	if (*all && fs.NArg() != 0) || (!*all && fs.NArg() < 1) {
-		return removeOptions{}, false, errors.New("usage: ksbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all")
+		return removeOptions{}, false, errors.New("usage: qsbx rm [-f|--force] [--format table|json|yaml] SANDBOX... | --all")
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
 	if err != nil {
@@ -1199,7 +1199,7 @@ func (r *Runner) confirmRemoval(count int) (bool, error) {
 
 func (r *Runner) wait(ctx context.Context, args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx wait <operation-id>")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx wait <operation-id>")
 		return 2
 	}
 	client, err := r.client()
@@ -1233,7 +1233,7 @@ func (r *Runner) lifecycle(ctx context.Context, name string, args []string) int 
 		return r.flagParseFailure(name, err)
 	}
 	if fs.NArg() < 1 {
-		_, _ = fmt.Fprintf(r.Err, "usage: ksbx %s [--format table|json|yaml] [--json] [flags] SANDBOX...\n", name)
+		_, _ = fmt.Fprintf(r.Err, "usage: qsbx %s [--format table|json|yaml] [--json] [flags] SANDBOX...\n", name)
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -1331,10 +1331,10 @@ func (r *Runner) printSandbox(sb *sdk.Sandbox) {
 }
 
 func (r *Runner) usage() {
-	_, _ = fmt.Fprintln(r.Out, "usage: ksbx [--socket PATH] <command>")
+	_, _ = fmt.Fprintln(r.Out, "usage: qsbx [--socket PATH] <command>")
 	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
 	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  daemon unix socket")
-	_, _ = fmt.Fprintln(r.Out, `Use "ksbx <command> --help" for command details.`)
+	_, _ = fmt.Fprintln(r.Out, `Use "qsbx <command> --help" for command details.`)
 }
 
 func (r *Runner) error(err error) {

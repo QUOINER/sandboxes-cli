@@ -113,7 +113,7 @@ func TestListHelpExitsZero(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"ls", "--help"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "usage: ksbx ls") {
+	if !strings.Contains(out.String(), "usage: qsbx ls") {
 		t.Fatalf("missing help: %q", out.String())
 	}
 }

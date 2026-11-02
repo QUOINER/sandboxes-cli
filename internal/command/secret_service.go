@@ -44,7 +44,7 @@ func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx secret set SERVICE [--sandbox NAME] [--token VALUE]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret set SERVICE [--sandbox NAME] [--token VALUE]")
 		return 2
 	}
 	service := strings.ToLower(fs.Arg(0))
@@ -140,7 +140,7 @@ func (r *Runner) serviceSecretRemove(ctx context.Context, args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx secret rm SERVICE [--sandbox NAME]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret rm SERVICE [--sandbox NAME]")
 		return 2
 	}
 	scope := sdk.SecretScopeGlobal
@@ -176,7 +176,7 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		return code
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx secret ls [--format table|json|yaml]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret ls [--format table|json|yaml]")
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)

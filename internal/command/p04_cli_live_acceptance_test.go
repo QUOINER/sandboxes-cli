@@ -25,7 +25,7 @@ const p04CLISyntheticSecret = "klorq-p04-cli-synthetic-credential"
 
 func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	inputs := getP04CLIInputs(t)
-	root, err := os.MkdirTemp("/private/tmp", "ksbx-p04-cli-")
+	root, err := os.MkdirTemp("/private/tmp", "qsbx-p04-cli-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,12 +36,12 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if err := os.Mkdir(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cliPath := filepath.Join(binDir, "ksbx")
+	cliPath := filepath.Join(binDir, "qsbx")
 	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	build := exec.Command("go", "build", "-trimpath", "-o", cliPath, "./cmd/ksbx")
+	build := exec.Command("go", "build", "-trimpath", "-o", cliPath, "./cmd/qsbx")
 	build.Dir = moduleRoot
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build owned CLI: %v: %s", err, output)
