@@ -214,6 +214,11 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "usage: ksbx login [--username USER --password-stdin]")
+		_, _ = fmt.Fprintln(fs.Output(), "Without flags, complete Docker device authorization in your browser.")
+		fs.PrintDefaults()
+	}
 	username := fs.String("username", "", "Docker Hub username for PAT login")
 	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
 	if err := fs.Parse(args); err != nil {
@@ -250,13 +255,40 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
 		return 0
 	}
-	_, _ = fmt.Fprintln(r.Err, "Opening Docker sign-in in your browser. Complete the authorization to finish login.")
-	if err := sdk.Accounts(client).Login(ctx, "docker"); err != nil {
+	if err := sdk.InteractiveAccounts(client).LoginInteractive(ctx, "docker", func(ctx context.Context, info sdk.DeviceLoginInfo) error {
+		return r.waitForDeviceLoginHandoff(ctx, info)
+	}); err != nil {
 		r.error(err)
 		return 1
 	}
 	_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
 	return 0
+}
+
+func (r *Runner) waitForDeviceLoginHandoff(ctx context.Context, info sdk.DeviceLoginInfo) error {
+	if r.In == nil {
+		return errors.New("interactive login input is unavailable")
+	}
+	if _, err := fmt.Fprintf(r.Err, "Docker verification code: %s\nPress Enter to open %s, or Ctrl-C to cancel.\n", info.UserCode, info.VerificationURI); err != nil {
+		return errors.New("write Docker device authorization details failed")
+	}
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := bufio.NewReader(r.In).ReadString('\n')
+		readDone <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-readDone:
+		if err != nil {
+			return errors.New("docker device login canceled before authorization handoff")
+		}
+		if _, err := fmt.Fprintln(r.Err, "Waiting for Docker authorization..."); err != nil {
+			return errors.New("write Docker authorization status failed")
+		}
+		return nil
+	}
 }
 
 func readDockerPassword(input io.Reader) ([]byte, error) {

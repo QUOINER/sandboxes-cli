@@ -173,12 +173,37 @@ func TestAccountCommandsUseAccountService(t *testing.T) {
 		if code := runner.Run(context.Background(), args); code != 0 || !called {
 			t.Fatalf("%s: exit=%d client called=%t output=%q", command, code, called, out.String())
 		}
+		if command == "login" && (!strings.Contains(out.String(), "Docker verification code: ABCD-EFGH") || !strings.Contains(out.String(), "Press Enter to open https://login.example/device") || !strings.Contains(out.String(), "Waiting for Docker authorization")) {
+			t.Fatalf("login omitted the device code or Enter handoff prompt: %q", out.String())
+		}
 		if strings.Contains(out.String(), "synthetic-token") {
 			t.Fatalf("account command consumed or printed registry input: %q", out.String())
 		}
+		out.Reset()
 		if code := runner.Run(context.Background(), []string{command, "--help"}); code != 0 {
 			t.Fatalf("%s --help exit=%d", command, code)
 		}
+		if command == "login" && !strings.Contains(out.String(), "Docker device authorization") {
+			t.Fatalf("login help omitted browser device authorization: %q", out.String())
+		}
+	}
+}
+
+func TestLoginEOFCancelsBeforeDeviceHandoff(t *testing.T) {
+	var out bytes.Buffer
+	completed := false
+	interactive := interactiveAccountFunc(func(ctx context.Context, _ string, handoff func(context.Context, sdk.DeviceLoginInfo) error) error {
+		if err := handoff(ctx, sdk.DeviceLoginInfo{UserCode: "ABCD-EFGH", VerificationURI: "https://login.example/device"}); err != nil {
+			return err
+		}
+		completed = true
+		return nil
+	})
+	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+		return fakeClient{interactive: interactive}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"login"}); code == 0 || completed {
+		t.Fatalf("EOF should cancel before opening the browser, exit=%d completed=%t output=%q", code, completed, out.String())
 	}
 }
 
@@ -264,12 +289,13 @@ func TestSecretHelpAndAlias(t *testing.T) {
 }
 
 type fakeClient struct {
-	registry   *fakeRegistryCredentials
-	secrets    sdk.SecretService
-	sandbox    sdk.SandboxService
-	operations sdk.OperationService
-	accounts   sdk.AccountService
-	dockerPAT  sdk.DockerPATAccountService
+	registry    *fakeRegistryCredentials
+	secrets     sdk.SecretService
+	sandbox     sdk.SandboxService
+	operations  sdk.OperationService
+	accounts    sdk.AccountService
+	interactive sdk.InteractiveAccountService
+	dockerPAT   sdk.DockerPATAccountService
 }
 
 func (f fakeClient) DockerPATAccountService() sdk.DockerPATAccountService {
@@ -315,7 +341,31 @@ func (f fakeClient) AccountService() sdk.AccountService {
 	}
 	return f.accounts
 }
+func (f fakeClient) InteractiveAccountService() sdk.InteractiveAccountService {
+	if f.interactive != nil {
+		return f.interactive
+	}
+	if f.accounts == nil {
+		return nil
+	}
+	return fakeInteractiveAccounts{accounts: f.accounts}
+}
 func (fakeClient) Close() error { return nil }
+
+type fakeInteractiveAccounts struct{ accounts sdk.AccountService }
+
+type interactiveAccountFunc func(context.Context, string, func(context.Context, sdk.DeviceLoginInfo) error) error
+
+func (f interactiveAccountFunc) LoginInteractive(ctx context.Context, provider string, handoff func(context.Context, sdk.DeviceLoginInfo) error) error {
+	return f(ctx, provider, handoff)
+}
+
+func (f fakeInteractiveAccounts) LoginInteractive(ctx context.Context, provider string, handoff func(context.Context, sdk.DeviceLoginInfo) error) error {
+	if err := handoff(ctx, sdk.DeviceLoginInfo{UserCode: "ABCD-EFGH", VerificationURI: "https://login.example/device"}); err != nil {
+		return err
+	}
+	return f.accounts.Login(ctx, provider)
+}
 
 type fakeAccounts struct{}
 
