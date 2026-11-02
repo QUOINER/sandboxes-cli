@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 const cpUsage = `usage: ksbx cp SRC DST

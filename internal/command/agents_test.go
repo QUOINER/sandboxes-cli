@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 func TestKimiAgentSpec(t *testing.T) {

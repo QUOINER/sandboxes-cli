@@ -3,7 +3,7 @@ package command
 import (
 	"fmt"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 const (

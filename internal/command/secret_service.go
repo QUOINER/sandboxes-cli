@@ -15,7 +15,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 var serviceSecretNames = []string{

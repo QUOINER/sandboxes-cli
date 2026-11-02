@@ -12,9 +12,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 
-	"github.com/KLORQ/sandboxes-cli/internal/version"
+	"github.com/QUOINER/sandboxes-cli/internal/version"
 )
 
 type diagnoseReport struct {
