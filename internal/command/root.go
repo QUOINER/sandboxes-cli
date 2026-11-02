@@ -291,7 +291,7 @@ func (r *Runner) waitForDeviceLoginHandoff(ctx context.Context, info sdk.DeviceL
 	if r.In == nil {
 		return errors.New("interactive login input is unavailable")
 	}
-	if _, err := fmt.Fprintf(r.Err, "Docker verification code: %s\nPress Enter to open %s, or Ctrl-C to cancel.\n", info.UserCode, info.VerificationURI); err != nil {
+	if _, err := fmt.Fprintf(r.Err, "Docker verification code: %s\nPress Enter to open %s, or Ctrl-C to cancel.\nIf the browser does not open, visit the URL above and enter the code.\n", info.UserCode, info.VerificationURI); err != nil {
 		return errors.New("write Docker device authorization details failed")
 	}
 	readDone := make(chan error, 1)

@@ -173,7 +173,7 @@ func TestAccountCommandsUseAccountService(t *testing.T) {
 		if code := runner.Run(context.Background(), args); code != 0 || !called {
 			t.Fatalf("%s: exit=%d client called=%t output=%q", command, code, called, out.String())
 		}
-		if command == "login" && (!strings.Contains(out.String(), "Docker verification code: ABCD-EFGH") || !strings.Contains(out.String(), "Press Enter to open https://login.example/device") || !strings.Contains(out.String(), "Waiting for Docker authorization")) {
+		if command == "login" && (!strings.Contains(out.String(), "Docker verification code: ABCD-EFGH") || !strings.Contains(out.String(), "Press Enter to open https://login.example/device") || !strings.Contains(out.String(), "If the browser does not open, visit the URL above and enter the code.") || !strings.Contains(out.String(), "Waiting for Docker authorization")) {
 			t.Fatalf("login omitted the device code or Enter handoff prompt: %q", out.String())
 		}
 		if strings.Contains(out.String(), "synthetic-token") {
