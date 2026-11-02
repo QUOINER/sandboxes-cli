@@ -69,19 +69,8 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cleanupCancel()
 		if daemon != nil && daemon.Process != nil {
-			if secretStored {
-				if _, secretErr := runP04CLI(cleanupCtx, cliPath, cliSocket, cliEnv, "secret", "rm", "openai", "--sandbox", name); secretErr != nil {
-					account := "openai/sandbox/" + name
-					security := exec.CommandContext(cleanupCtx, "/usr/bin/security", "delete-generic-password", "-s", "com.klorq.service-secrets.v1", "-a", account)
-					if output, fallbackErr := security.CombinedOutput(); fallbackErr != nil {
-						t.Errorf("remove owned CLI service secret via daemon (%v) and keychain fallback (%v): %s", secretErr, fallbackErr, output)
-					}
-				}
-			}
-			if sandboxCreated {
-				if _, sandboxErr := runP04CLI(cleanupCtx, cliPath, cliSocket, cliEnv, "rm", "--force", name); sandboxErr != nil {
-					t.Errorf("remove owned CLI acceptance sandbox: %v", sandboxErr)
-				}
+			if err := cleanupP04CLIResources(cleanupCtx, cliPath, cliSocket, cliEnv, name, secretStored, sandboxCreated); err != nil {
+				t.Errorf("remove owned CLI acceptance resources: %v", err)
 			}
 		}
 		stopP04CLIProcess(t, daemon, daemonDone)
@@ -317,6 +306,39 @@ func runP04CLI(ctx context.Context, binary, socket string, env []string, args ..
 		return redacted, fmt.Errorf("CLI %q exited unsuccessfully: %w: %s", args[0], err, redacted)
 	}
 	return redacted, nil
+}
+
+func removeP04CLISecret(ctx context.Context, binary, socket string, env []string, sandboxName string) error {
+	_, err := runP04CLI(ctx, binary, socket, env, "secret", "rm", "openai", "--sandbox", sandboxName)
+	if err == nil {
+		return nil
+	}
+	account := "openai/sandbox/" + sandboxName
+	security := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", "com.klorq.service-secrets.v1", "-a", account)
+	if output, fallbackErr := security.CombinedOutput(); fallbackErr != nil {
+		return fmt.Errorf("daemon cleanup failed: %w; keychain cleanup failed: %w: %s", err, fallbackErr, output)
+	}
+	return nil
+}
+
+func removeP04CLISandbox(ctx context.Context, binary, socket string, env []string, sandboxName string) error {
+	_, err := runP04CLI(ctx, binary, socket, env, "rm", "--force", sandboxName)
+	return err
+}
+
+func cleanupP04CLIResources(ctx context.Context, binary, socket string, env []string, sandboxName string, secretStored, sandboxCreated bool) error {
+	var cleanupErrors []error
+	if secretStored {
+		if err := removeP04CLISecret(ctx, binary, socket, env, sandboxName); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove service secret: %w", err))
+		}
+	}
+	if sandboxCreated {
+		if err := removeP04CLISandbox(ctx, binary, socket, env, sandboxName); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove sandbox: %w", err))
+		}
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 func scanP04CLIState(root string, secret []byte) error {
