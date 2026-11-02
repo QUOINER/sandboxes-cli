@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -64,6 +65,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	containerdSocket := filepath.Join(root, "containerd.sock")
 	cliSocket := filepath.Join(root, "sandboxesd.sock")
 	name := "p04-cli-" + randomP04CLIName(t)
+	brokerSocket := ""
 	workspace := filepath.Join(root, "workspace")
 	if err := os.Mkdir(workspace, 0o700); err != nil {
 		t.Fatal(err)
@@ -77,6 +79,11 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 		}
 		stopP04CLIProcess(t, daemon, daemonDone)
 		stopP04CLIProcess(t, containerd, containerdDone)
+		if brokerSocket != "" {
+			if err := removeP04CLIBrokerSocket(brokerSocket); err != nil {
+				t.Errorf("remove only the owned stale broker socket: %v", err)
+			}
+		}
 		if daemonLog != nil {
 			if err := daemonLog.Close(); err != nil {
 				t.Errorf("close owned daemon log: %v", err)
@@ -103,18 +110,23 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	containerd = exec.Command(inputs.containerd, "--config", containerdConfig)
-	containerd.Env = append(os.Environ(),
-		"PATH="+binDir+string(os.PathListSeparator)+"/opt/homebrew/bin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/bin:/bin",
-		"LIBKRUN_PATH="+inputs.libkrun,
-		"SAILOR_PATH="+filepath.Join(filepath.Dir(inputs.shim), "lib"),
-	)
-	containerd.Stdout, containerd.Stderr = containerdLog, containerdLog
-	containerdDone, err = startP04CLIProcess(containerd)
-	if err != nil {
-		t.Fatalf("start owned containerd: %v", err)
+	startContainerd := func() error {
+		containerd = exec.Command(inputs.containerd, "--config", containerdConfig)
+		containerd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		containerd.Env = append(os.Environ(),
+			"PATH="+binDir+string(os.PathListSeparator)+"/opt/homebrew/bin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/bin:/bin",
+			"LIBKRUN_PATH="+inputs.libkrun,
+			"SAILOR_PATH="+filepath.Join(filepath.Dir(inputs.shim), "lib"),
+		)
+		containerd.Stdout, containerd.Stderr = containerdLog, containerdLog
+		var startErr error
+		containerdDone, startErr = startP04CLIProcess(containerd)
+		if startErr != nil {
+			return startErr
+		}
+		return waitP04CLISocket(ctx, inputs.ctr, containerdSocket, containerdDone)
 	}
-	if err := waitP04CLISocket(ctx, inputs.ctr, containerdSocket, containerdDone); err != nil {
+	if err := startContainerd(); err != nil {
 		t.Fatalf("wait for owned containerd: %v", err)
 	}
 
@@ -166,7 +178,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if sandboxID == "" {
 		t.Fatal("CLI run did not return the owned sandbox ID")
 	}
-	brokerSocket := p04CLIBrokerSocket(sandboxID)
+	brokerSocket = p04CLIBrokerSocket(sandboxID)
 	checkEnv := `test "$OPENAI_API_KEY" = klorq-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
 	execWithProxyEnv := func() (string, error) {
 		return runP04CLI(ctx, cliPath, cliSocket, cliEnv, "exec", "--env", "OPENAI_API_KEY=${proxy:openai}", name, "/bin/sh", "-c", checkEnv)
@@ -216,6 +228,44 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if _, err := execWithProxyEnv(); err != nil {
 		t.Fatalf("CLI exec after daemon recovery did not receive proxy placeholder env: %v", err)
 	}
+	// Simulate loss of the entire owned host runtime process group. The group is
+	// isolated with Setpgid above, so this cannot signal the test runner or any
+	// user-owned containerd/VM. This is process-crash evidence, not a power-loss
+	// simulation.
+	if err := daemon.Process.Kill(); err != nil {
+		t.Fatalf("kill owned daemon before runtime-stack crash test: %v", err)
+	}
+	select {
+	case <-daemonDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("owned daemon did not exit before runtime-stack crash test")
+	}
+	daemon = nil
+	if err := killP04CLIProcessGroup(containerd, containerdDone); err != nil {
+		t.Fatalf("kill only the owned containerd runtime process group: %v", err)
+	}
+	containerd = nil
+	containerdDone = nil
+	for _, socket := range []string{containerdSocket, containerdSocket + ".ttrpc", cliSocket} {
+		if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("remove stale owned runtime socket %s: %v", filepath.Base(socket), err)
+		}
+	}
+	if err := startContainerd(); err != nil {
+		t.Fatalf("restart owned containerd after runtime process-group loss: %v", err)
+	}
+	if err := startDaemon(); err != nil {
+		t.Fatalf("restart owned daemon after runtime process-group loss: %v", err)
+	}
+	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "start", name); err != nil {
+		t.Fatalf("CLI start did not recover after owned runtime process-group loss: %v", err)
+	}
+	if err := requestP04CLIBrokerToken(ctx, brokerSocket); err != nil {
+		t.Fatalf("host broker did not recover after runtime process-group loss: %v", err)
+	}
+	if _, err := execWithProxyEnv(); err != nil {
+		t.Fatalf("CLI exec after runtime process-group recovery failed: %v", err)
+	}
 	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "secret", "rm", "openai", "--sandbox", name); err != nil {
 		t.Fatalf("CLI service secret revoke failed: %v", err)
 	} else {
@@ -232,7 +282,70 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	} else {
 		sandboxCreated = false
 	}
-	t.Log("PASS: CLI set/run/exec/stop/start, abrupt owned-daemon kill closed the host broker, CLI start recovered it, revoke denied later exec, rm and owned-resource cleanup")
+	t.Log("PASS: CLI set/run/exec/stop/start; daemon SIGKILL closed the broker; complete owned containerd process-group loss recovered from persistent state; revoke denied later exec; rm and owned-resource cleanup")
+}
+
+func killP04CLIProcessGroup(cmd *exec.Cmd, done <-chan struct{}) error {
+	if cmd == nil || cmd.Process == nil || done == nil {
+		return errors.New("owned containerd process group is unavailable")
+	}
+	pgid := cmd.Process.Pid // Setpgid makes the leader PID the unique process-group ID.
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("signal owned containerd process group: %w", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		return errors.New("owned containerd did not exit after process-group kill")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		err := syscall.Kill(-pgid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, syscall.EPERM) {
+			return fmt.Errorf("inspect owned containerd process group: %w", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return errors.New("owned containerd process group still has processes after SIGKILL")
+}
+
+func removeP04CLIBrokerSocket(path string) error {
+	dir := filepath.Dir(path)
+	dirInfo, err := os.Lstat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || dirInfo.Mode().Perm()&0o077 != 0 || !p04CLIOwnedByCurrentUser(dirInfo) {
+		return errors.New("refusing to inspect a broker socket in a non-private directory")
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 || info.Mode()&os.ModeSymlink != 0 || !p04CLIOwnedByCurrentUser(info) {
+		return errors.New("refusing to remove a broker path not owned by this user")
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if err := os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func p04CLIOwnedByCurrentUser(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Getuid()
 }
 
 type p04CLIInputs struct {
