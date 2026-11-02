@@ -5,10 +5,13 @@ package command
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +61,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	var containerdDone, daemonDone <-chan struct{}
 	var containerdLog, daemonLog *os.File
 	secretStored, sandboxCreated := false, false
+	containerdSocket := filepath.Join(root, "containerd.sock")
 	cliSocket := filepath.Join(root, "sandboxesd.sock")
 	name := "p04-cli-" + randomP04CLIName(t)
 	workspace := filepath.Join(root, "workspace")
@@ -68,10 +72,8 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	cleanup := func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cleanupCancel()
-		if daemon != nil && daemon.Process != nil {
-			if err := cleanupP04CLIResources(cleanupCtx, cliPath, cliSocket, cliEnv, name, secretStored, sandboxCreated); err != nil {
-				t.Errorf("remove owned CLI acceptance resources: %v", err)
-			}
+		if err := cleanupP04CLIResources(cleanupCtx, cliPath, cliSocket, cliEnv, inputs.ctr, containerdSocket, name, secretStored, sandboxCreated); err != nil {
+			t.Errorf("remove owned CLI acceptance resources: %v", err)
 		}
 		stopP04CLIProcess(t, daemon, daemonDone)
 		stopP04CLIProcess(t, containerd, containerdDone)
@@ -91,7 +93,6 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 
-	containerdSocket := filepath.Join(root, "containerd.sock")
 	containerdConfig := filepath.Join(root, "containerd.toml")
 	config := fmt.Sprintf("version = 4\nroot = %q\nstate = %q\n[plugins.'io.containerd.server.v1.grpc']\naddress = %q\nuid = %d\ngid = %d\n[plugins.'io.containerd.server.v1.ttrpc']\naddress = %q\nuid = %d\ngid = %d\n",
 		filepath.Join(root, "containerd-root"), filepath.Join(root, "containerd-state"), containerdSocket, os.Getuid(), os.Getgid(), containerdSocket+".ttrpc", os.Getuid(), os.Getgid())
@@ -129,19 +130,23 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 		"-gvproxy", inputs.gvproxy, "-run-dir", filepath.Join(root, "run", "gateway"),
 		"-proxy-helper", inputs.helper,
 	}
-	daemon = exec.Command(inputs.daemon, daemonArgs...)
-	daemon.Env = append(os.Environ(),
-		"PATH="+binDir+string(os.PathListSeparator)+"/opt/homebrew/bin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/bin:/bin",
-		"LIBKRUN_PATH="+inputs.libkrun,
-		"SAILOR_PATH="+filepath.Join(filepath.Dir(inputs.shim), "lib"),
-	)
-	daemon.Stdout, daemon.Stderr = daemonLog, daemonLog
-	daemonDone, err = startP04CLIProcess(daemon)
-	if err != nil {
-		t.Fatalf("start owned daemon: %v", err)
+	startDaemon := func() error {
+		daemon = exec.Command(inputs.daemon, daemonArgs...)
+		daemon.Env = append(os.Environ(),
+			"PATH="+binDir+string(os.PathListSeparator)+"/opt/homebrew/bin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/bin:/bin",
+			"LIBKRUN_PATH="+inputs.libkrun,
+			"SAILOR_PATH="+filepath.Join(filepath.Dir(inputs.shim), "lib"),
+		)
+		daemon.Stdout, daemon.Stderr = daemonLog, daemonLog
+		var startErr error
+		daemonDone, startErr = startP04CLIProcess(daemon)
+		if startErr != nil {
+			return startErr
+		}
+		return waitP04CLISocket(ctx, cliPath, cliSocket, daemonDone)
 	}
-	if err := waitP04CLISocket(ctx, cliPath, cliSocket, daemonDone); err != nil {
-		t.Fatalf("wait for owned daemon: %v", err)
+	if err := startDaemon(); err != nil {
+		t.Fatalf("start owned daemon: %v", err)
 	}
 
 	if output, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "secret", "set", "openai", "--sandbox", name, "--token", p04CLISyntheticSecret); err != nil {
@@ -151,11 +156,17 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	} else {
 		secretStored = true
 	}
-	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "run", "--detach", "--name", name, "--image", inputs.image, "--env", "OPENAI_API_KEY=${proxy:openai}", "shell", workspace); err != nil {
+	runOutput, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "run", "--detach", "--name", name, "--image", inputs.image, "--env", "OPENAI_API_KEY=${proxy:openai}", "shell", workspace)
+	if err != nil {
 		t.Fatalf("CLI run did not create/start the owned sandbox: %v", err)
 	} else {
 		sandboxCreated = true
 	}
+	sandboxID := strings.TrimSpace(runOutput)
+	if sandboxID == "" {
+		t.Fatal("CLI run did not return the owned sandbox ID")
+	}
+	brokerSocket := p04CLIBrokerSocket(sandboxID)
 	checkEnv := `test "$OPENAI_API_KEY" = klorq-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
 	execWithProxyEnv := func() (string, error) {
 		return runP04CLI(ctx, cliPath, cliSocket, cliEnv, "exec", "--env", "OPENAI_API_KEY=${proxy:openai}", name, "/bin/sh", "-c", checkEnv)
@@ -171,6 +182,39 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	}
 	if _, err := execWithProxyEnv(); err != nil {
 		t.Fatalf("CLI exec after restart did not receive proxy placeholder env: %v", err)
+	}
+	if err := requestP04CLIBrokerToken(ctx, brokerSocket); err != nil {
+		t.Fatalf("positive control host broker request before daemon kill: %v", err)
+	}
+	if err := daemon.Process.Kill(); err != nil {
+		t.Fatalf("kill only the owned daemon process: %v", err)
+	}
+	select {
+	case <-daemonDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("owned daemon did not exit after SIGKILL")
+	}
+	daemon = nil
+	if err := os.Remove(cliSocket); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove stale owned daemon socket: %v", err)
+	}
+	if _, err := execP04CLIInGuest(ctx, inputs.ctr, containerdSocket, filepath.Join(root, "fifo"), name, "/bin/true"); err != nil {
+		t.Fatalf("positive control guest exec after daemon kill: %v", err)
+	}
+	if err := requestP04CLIBrokerToken(ctx, brokerSocket); err == nil {
+		t.Fatal("host broker remained available after abrupt daemon termination")
+	}
+	if err := startDaemon(); err != nil {
+		t.Fatalf("restart owned daemon after process death: %v", err)
+	}
+	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "start", name); err != nil {
+		t.Fatalf("CLI start did not recover the daemon-killed sandbox: %v", err)
+	}
+	if err := requestP04CLIBrokerToken(ctx, brokerSocket); err != nil {
+		t.Fatalf("host broker did not recover after daemon restart: %v", err)
+	}
+	if _, err := execWithProxyEnv(); err != nil {
+		t.Fatalf("CLI exec after daemon recovery did not receive proxy placeholder env: %v", err)
 	}
 	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "secret", "rm", "openai", "--sandbox", name); err != nil {
 		t.Fatalf("CLI service secret revoke failed: %v", err)
@@ -188,7 +232,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	} else {
 		sandboxCreated = false
 	}
-	t.Log("PASS: CLI set/run/exec/stop/start/revoke/exec-fail/rm used only an owned daemon, VM, workspace and sandbox-scoped synthetic keychain secret")
+	t.Log("PASS: CLI set/run/exec/stop/start, abrupt owned-daemon kill closed the host broker, CLI start recovered it, revoke denied later exec, rm and owned-resource cleanup")
 }
 
 type p04CLIInputs struct {
@@ -308,6 +352,57 @@ func runP04CLI(ctx context.Context, binary, socket string, env []string, args ..
 	return redacted, nil
 }
 
+func execP04CLIInGuest(ctx context.Context, ctrPath, containerdSocket, fifoDir, sandboxName string, argv ...string) (string, error) {
+	var nonce [8]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	execID := "klorq-p04-probe-" + hex.EncodeToString(nonce[:])
+	args := make([]string, 0, 11+len(argv))
+	args = append(args,
+		"--address", containerdSocket, "--namespace", "klorq", "tasks", "exec",
+		"--exec-id", execID, "--fifo-dir", fifoDir, "klorq-"+sandboxName,
+	)
+	args = append(args, argv...)
+	cmd := exec.CommandContext(ctx, ctrPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("owned guest probe failed: %w: %s", err, output)
+	}
+	return string(output), nil
+}
+
+func p04CLIBrokerSocket(sandboxID string) string {
+	hash := sha256.Sum256([]byte(sandboxID))
+	return filepath.Join("/tmp", "kp-"+hex.EncodeToString(hash[:8]), "p.sock")
+}
+
+func requestP04CLIBrokerToken(ctx context.Context, socket string) error {
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker/__klorq/proxy/token", http.NoBody)
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = response.Body.Close()
+		transport.CloseIdleConnections()
+	}()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		return err
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("broker returned status %d", response.StatusCode)
+	}
+	return nil
+}
+
 func removeP04CLISecret(ctx context.Context, binary, socket string, env []string, sandboxName string) error {
 	_, err := runP04CLI(ctx, binary, socket, env, "secret", "rm", "openai", "--sandbox", sandboxName)
 	if err == nil {
@@ -326,7 +421,7 @@ func removeP04CLISandbox(ctx context.Context, binary, socket string, env []strin
 	return err
 }
 
-func cleanupP04CLIResources(ctx context.Context, binary, socket string, env []string, sandboxName string, secretStored, sandboxCreated bool) error {
+func cleanupP04CLIResources(ctx context.Context, binary, socket string, env []string, ctrPath, containerdSocket, sandboxName string, secretStored, sandboxCreated bool) error {
 	var cleanupErrors []error
 	if secretStored {
 		if err := removeP04CLISecret(ctx, binary, socket, env, sandboxName); err != nil {
@@ -335,10 +430,53 @@ func cleanupP04CLIResources(ctx context.Context, binary, socket string, env []st
 	}
 	if sandboxCreated {
 		if err := removeP04CLISandbox(ctx, binary, socket, env, sandboxName); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove sandbox: %w", err))
+			if runtimeErr := cleanupP04CLIContainer(ctx, ctrPath, containerdSocket, sandboxName); runtimeErr != nil {
+				cleanupErrors = append(cleanupErrors, errors.Join(fmt.Errorf("remove sandbox through CLI: %w", err), runtimeErr))
+			}
 		}
 	}
 	return errors.Join(cleanupErrors...)
+}
+
+func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sandboxName string) error {
+	containerID := "klorq-" + sandboxName
+	containers, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "containers", "list", "-q").Output()
+	if err != nil {
+		return fmt.Errorf("list owned containerd containers: %w", err)
+	}
+	found := false
+	for _, id := range strings.Fields(string(containers)) {
+		if id == containerID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	tasks, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "tasks", "list", "-q").Output()
+	if err != nil {
+		return fmt.Errorf("list owned containerd tasks: %w", err)
+	}
+	for _, id := range strings.Fields(string(tasks)) {
+		if id != containerID {
+			continue
+		}
+		kill := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "tasks", "kill", "--signal", "SIGKILL", containerID)
+		if output, err := kill.CombinedOutput(); err != nil {
+			return fmt.Errorf("kill owned task: %w: %s", err, output)
+		}
+		removeTask := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "tasks", "delete", containerID)
+		if output, err := removeTask.CombinedOutput(); err != nil {
+			return fmt.Errorf("delete owned task: %w: %s", err, output)
+		}
+		break
+	}
+	removeContainer := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "containers", "delete", containerID)
+	if output, err := removeContainer.CombinedOutput(); err != nil {
+		return fmt.Errorf("delete owned container: %w: %s", err, output)
+	}
+	return nil
 }
 
 func scanP04CLIState(root string, secret []byte) error {
