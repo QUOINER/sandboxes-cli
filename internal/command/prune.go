@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 type pruneOptions struct {

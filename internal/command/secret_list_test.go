@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 type secretListClient struct {

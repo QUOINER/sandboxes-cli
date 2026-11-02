@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/KLORQ/sandboxes-cli/internal/command"
+	"github.com/QUOINER/sandboxes-cli/internal/command"
 )
 
 func main() {

@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 )
 
 const listUsage = `usage: qsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]

@@ -11,9 +11,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/QUOINER/sandboxes-go-sdk"
 
-	"github.com/KLORQ/sandboxes-cli/internal/version"
+	"github.com/QUOINER/sandboxes-cli/internal/version"
 )
 
 const versionUsage = `usage: qsbx version [--format text|json|yaml] [--json]
