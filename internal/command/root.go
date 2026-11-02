@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 
-	"github.com/KLORQ/sandboxes-cli/internal/kit"
+	"github.com/quoiner/sandboxes-cli/internal/kit"
 )
 
 const (
@@ -200,9 +200,11 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.daemon(args), true
 	case "template":
 		return r.template(args), true
+	case "tui":
+		return r.tui(ctx, args), true
 	case commandReset:
 		return r.reset(ctx, args), true
-	case "volume", "env", "mcp", "tui", "move", "ttl", "setup", "skills":
+	case "volume", "env", "mcp", "move", "ttl", "setup", "skills":
 		return r.unsupportedFamily(name), true
 	case completionCommand:
 		return r.completion(args), true
@@ -476,7 +478,6 @@ func (r *Runner) unsupportedFamily(name string) int {
 		"volume": "persistent volumes are cloud-only in this build",
 		"env":    "declarative sbxenv files are not implemented",
 		"mcp":    "the MCP gateway is not implemented",
-		"tui":    "the terminal dashboard is not implemented",
 		"move":   "cloud move is unavailable without a tenant",
 		"ttl":    "cloud TTL is unavailable without a tenant",
 		"setup":  "host setup is not implemented",
@@ -1278,7 +1279,7 @@ func (r *Runner) printSandbox(sb *sdk.Sandbox) {
 
 func (r *Runner) usage() {
 	_, _ = fmt.Fprintln(r.Out, "usage: qsbx [--socket PATH] <command>")
-	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
+	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, tui, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
 	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  daemon unix socket")
 	_, _ = fmt.Fprintln(r.Out, `Use "qsbx <command> --help" for command details.`)
 }

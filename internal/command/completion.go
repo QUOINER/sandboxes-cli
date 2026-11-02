@@ -22,6 +22,7 @@ var completionTree = map[string][]string{
 	"rm":              {"-f", forceFlag, "--all", formatFlag, jsonFlag},
 	"prune":           {"--dry-run", "-f", forceFlag, "--filter", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
+	"tui":             {"--refresh"},
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {forceFlag},

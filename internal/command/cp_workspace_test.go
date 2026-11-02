@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 func TestFollowLinkWorkspaceBoundary(t *testing.T) {

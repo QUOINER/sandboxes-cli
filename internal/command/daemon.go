@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 const daemonUsage = `Usage: qsbx daemon COMMAND

@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/KLORQ/sandboxes-cli/internal/settings"
+	"github.com/quoiner/sandboxes-cli/internal/settings"
 )
 
 const settingsUsage = `Usage: qsbx settings COMMAND

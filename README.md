@@ -3,9 +3,11 @@
 Status: pre-alpha.
 
 Command-line and terminal client. Uses sandboxes-go-sdk; does not import daemon
-internals. The planned dashboard uses `github.com/gdamore/tcell/v3` as its
-terminal runtime. Bubble Tea is not used. TUI remains a thin view/input layer;
-non-interactive commands retain stable text and JSON output.
+internals. The interactive dashboard uses `github.com/gdamore/tcell/v3` as its
+terminal runtime. Its QUOINER wordmark and orbital mark use the brandbook's
+purple palette; the dashboard is a read-only view over local sandbox state.
+Bubble Tea is not used. Non-interactive commands retain stable text and JSON
+output.
 
 ## Commands
 
@@ -34,6 +36,7 @@ qsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --dry-run
 qsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --dry-run --filter until=168h
 qsbx --socket "$HOME/.sandboxes/sandboxesd.sock" prune --force
 qsbx --socket "$HOME/.sandboxes/sandboxesd.sock" diagnose
+qsbx --socket "$HOME/.sandboxes/sandboxesd.sock" tui
 qsbx completion bash > /tmp/qsbx-completion.bash
 source /tmp/qsbx-completion.bash
 qsbx --socket "$HOME/.sandboxes/sandboxesd.sock" wait <operation-id>
@@ -188,6 +191,12 @@ the OAuth-owned Docker Hub credentials and requests provider token revocation.
 Registry credentials created separately with `qsbx secret set` are preserved.
 If the provider cannot revoke a refresh token, the CLI reports that local
 credentials were removed but remote revocation did not complete.
+
+`qsbx tui` opens the local dashboard. It refreshes every five seconds by
+default; use `--refresh 10s` to change the interval. Arrow keys or `j`/`k`
+move through sandboxes, `r` refreshes immediately, and `q` or Escape closes the
+view. The dashboard requires an interactive terminal and does not mutate
+sandbox state.
 
 Registry secret storage does not currently validate credentials with the
 registry or enable authenticated pulls from a sandbox. Registry broker and

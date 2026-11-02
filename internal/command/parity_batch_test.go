@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KLORQ/sandboxes-cli/internal/version"
+	"github.com/quoiner/sandboxes-cli/internal/version"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 // TestLsUnknownFlagUsesSharedErrorContract covers PARITY P-34.

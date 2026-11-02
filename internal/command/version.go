@@ -11,9 +11,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 
-	"github.com/KLORQ/sandboxes-cli/internal/version"
+	"github.com/quoiner/sandboxes-cli/internal/version"
 )
 
 const versionUsage = `usage: qsbx version [--format text|json|yaml] [--json]
@@ -94,7 +94,7 @@ func (r *Runner) version(ctx context.Context, args []string) int {
 	} else {
 		_, _ = fmt.Fprintf(r.Out, "qsbx version %s\n", report.Client.Version)
 	}
-	if report.Server.State == "running" {
+	if report.Server.State == sandboxStateRunning {
 		_, _ = fmt.Fprintf(r.Out, "server %s (api %s)\n", report.Server.Version, report.Server.APIVersion)
 	} else {
 		_, _ = fmt.Fprintf(r.Out, "server unavailable: %s\n", report.Server.Error)
@@ -114,5 +114,5 @@ func (r *Runner) serverVersion(ctx context.Context) versionServerOutput {
 	if err != nil {
 		return versionServerOutput{State: stateUnavailable, Error: err.Error()}
 	}
-	return versionServerOutput{State: "running", Version: "v" + info.Version, APIVersion: info.APIVersion}
+	return versionServerOutput{State: sandboxStateRunning, Version: "v" + info.Version, APIVersion: info.APIVersion}
 }

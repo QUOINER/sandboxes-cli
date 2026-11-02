@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 type execOptions struct {

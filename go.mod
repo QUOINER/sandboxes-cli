@@ -1,15 +1,20 @@
-module github.com/KLORQ/sandboxes-cli
+module github.com/quoiner/sandboxes-cli
 
 go 1.27
 
 require (
-	github.com/KLORQ/sandboxes-go-sdk v0.0.11
+	github.com/quoiner/sandboxes-go-sdk v0.0.11
+	github.com/gdamore/tcell/v3 v3.4.1
 	golang.org/x/term v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/KLORQ/sandboxes-api v0.0.10 // indirect
+	github.com/quoiner/sandboxes-api v0.0.10 // indirect
+	github.com/clipperhouse/displaywidth v0.11.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/gdamore/encoding v1.0.1 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
