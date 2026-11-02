@@ -215,24 +215,29 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "usage: ksbx login [--username USER --password-stdin]")
+		_, _ = fmt.Fprintln(fs.Output(), "usage: ksbx login [--status | --username USER --password-stdin]")
 		_, _ = fmt.Fprintln(fs.Output(), "Without flags, complete Docker device authorization in your browser.")
 		fs.PrintDefaults()
 	}
 	username := fs.String("username", "", "Docker Hub username for PAT login")
 	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
+	showStatus := fs.Bool("status", false, "report whether Docker account credentials are stored locally")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("login", err)
 	}
-	if fs.NArg() != 0 || (*username == "") != !*passwordStdin {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx login [--username USER --password-stdin]")
+	if fs.NArg() != 0 || (*showStatus && (*username != "" || *passwordStdin)) || (!*showStatus && (*username == "") != !*passwordStdin) {
+		_, _ = fmt.Fprintln(r.Err, "usage: ksbx login [--status | --username USER --password-stdin]")
 		return 2
 	}
+	return r.performAccountLogin(ctx, *username, *passwordStdin, *showStatus)
+}
+
+func (r *Runner) performAccountLogin(ctx context.Context, username string, passwordStdin, showStatus bool) int {
 	var password []byte
-	if *passwordStdin {
+	if passwordStdin {
 		var err error
 		password, err = readDockerPassword(r.In)
 		if err != nil {
@@ -247,8 +252,11 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	if *passwordStdin {
-		if err := sdk.DockerPATAccounts(client).LoginWithPAT(ctx, *username, password); err != nil {
+	if showStatus {
+		return r.accountStatus(ctx, client)
+	}
+	if passwordStdin {
+		if err := sdk.DockerPATAccounts(client).LoginWithPAT(ctx, username, password); err != nil {
 			r.error(err)
 			return 1
 		}
@@ -262,6 +270,20 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 		return 1
 	}
 	_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
+	return 0
+}
+
+func (r *Runner) accountStatus(ctx context.Context, client sdk.Client) int {
+	present, err := sdk.AccountStatus(client).Status(ctx, "docker")
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if present {
+		_, _ = fmt.Fprintln(r.Out, "Docker account credentials are stored in the host keychain")
+		return 0
+	}
+	_, _ = fmt.Fprintln(r.Out, "No Docker account credentials are stored")
 	return 0
 }
 

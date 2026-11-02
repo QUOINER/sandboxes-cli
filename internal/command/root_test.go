@@ -238,6 +238,25 @@ func TestLoginDockerPATRejectsInvalidStdinWithoutConnecting(t *testing.T) {
 	}
 }
 
+func TestLoginStatusReportsOnlyCredentialPresence(t *testing.T) {
+	for _, present := range []bool{true, false} {
+		var out bytes.Buffer
+		runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{accountStatus: fakeAccountStatus{present: present}}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"login", "--status"}); code != 0 {
+			t.Fatalf("present=%t: exit=%d output=%q", present, code, out.String())
+		}
+		want := "No Docker account credentials are stored"
+		if present {
+			want = "Docker account credentials are stored in the host keychain"
+		}
+		if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "alice") || strings.Contains(out.String(), "token") {
+			t.Fatalf("present=%t: unexpected status output %q", present, out.String())
+		}
+	}
+}
+
 func TestLogoutForceStopsRunningLocalSandboxes(t *testing.T) {
 	var out bytes.Buffer
 	sandbox := &logoutSandbox{}
@@ -289,13 +308,22 @@ func TestSecretHelpAndAlias(t *testing.T) {
 }
 
 type fakeClient struct {
-	registry    *fakeRegistryCredentials
-	secrets     sdk.SecretService
-	sandbox     sdk.SandboxService
-	operations  sdk.OperationService
-	accounts    sdk.AccountService
-	interactive sdk.InteractiveAccountService
-	dockerPAT   sdk.DockerPATAccountService
+	registry      *fakeRegistryCredentials
+	secrets       sdk.SecretService
+	sandbox       sdk.SandboxService
+	operations    sdk.OperationService
+	accounts      sdk.AccountService
+	interactive   sdk.InteractiveAccountService
+	dockerPAT     sdk.DockerPATAccountService
+	accountStatus sdk.AccountStatusService
+}
+
+type fakeAccountStatus struct{ present bool }
+
+func (f fakeAccountStatus) Status(context.Context, string) (bool, error) { return f.present, nil }
+
+func (f fakeClient) AccountStatusService() sdk.AccountStatusService {
+	return f.accountStatus
 }
 
 func (f fakeClient) DockerPATAccountService() sdk.DockerPATAccountService {
