@@ -7,6 +7,14 @@ internals. The planned dashboard uses `github.com/gdamore/tcell/v3` as its
 terminal runtime. Bubble Tea is not used. TUI remains a thin view/input layer;
 non-interactive commands retain stable text and JSON output.
 
+## Migrating from `ksbx`
+
+The executable is now named `qsbx`. Update scripts, aliases, CI jobs, and
+package-manager references from `ksbx` to `qsbx`, then regenerate shell
+completions with `qsbx completion <shell>`. The daemon socket and sandbox data
+are unchanged. No `ksbx` compatibility binary or Docker-owned `sbx` alias is
+installed.
+
 ## Commands
 
 ```sh
