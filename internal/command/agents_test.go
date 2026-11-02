@@ -51,7 +51,7 @@ func TestRunKimiUsesAgentCommand(t *testing.T) {
 }
 
 func TestAgentRegistryPreviewAndUnsupported(t *testing.T) {
-	if !strings.HasPrefix(agentImage("codex"), "ghcr.io/klorq/sandbox-codex@sha256:") || agentCommand("codex") != "codex" {
+	if !strings.HasPrefix(agentImage("codex"), "ghcr.io/quoiner/sandbox-codex@sha256:") || agentCommand("codex") != "codex" {
 		t.Fatalf("codex image=%q command=%q", agentImage("codex"), agentCommand("codex"))
 	}
 	if !agentDocker("codex") {
@@ -60,7 +60,7 @@ func TestAgentRegistryPreviewAndUnsupported(t *testing.T) {
 	var image, profile string
 	var docker bool
 	applyAgentDefaults("codex", &image, &docker)
-	if !strings.HasPrefix(image, "ghcr.io/klorq/sandbox-codex@sha256:") || profile != "" || !docker {
+	if !strings.HasPrefix(image, "ghcr.io/quoiner/sandbox-codex@sha256:") || profile != "" || !docker {
 		t.Fatalf("codex defaults image=%q profile=%q docker=%v", image, profile, docker)
 	}
 	if err := validateRunAgent("codex"); err != nil {

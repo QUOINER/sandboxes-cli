@@ -20,4 +20,4 @@ jobs:
           context: agents/kimi
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/klorq/sandbox-kimi:0.43.0
+          tags: ghcr.io/quoiner/sandbox-kimi:0.43.0

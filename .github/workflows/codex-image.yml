@@ -23,5 +23,5 @@ jobs:
             --change 'WORKDIR /home/agent/workspace' --change 'USER agent' \
             --change 'LABEL com.docker.sandboxes.start-docker=true' \
             --change 'ENTRYPOINT ["tini","--"]' --change 'CMD ["codex"]' \
-            rootfs.tar ghcr.io/klorq/sandbox-codex:0.1
-          docker push ghcr.io/klorq/sandbox-codex:0.1
+            rootfs.tar ghcr.io/quoiner/sandbox-codex:0.1
+          docker push ghcr.io/quoiner/sandbox-codex:0.1

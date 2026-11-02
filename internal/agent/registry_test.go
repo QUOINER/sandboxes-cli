@@ -11,7 +11,7 @@ func TestRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	kimi, ok := r.Lookup("kimi")
-	if !ok || !kimi.Launchable() || !strings.HasPrefix(kimi.Image, "ghcr.io/klorq/sandbox-kimi@sha256:") || kimi.Command[0] != "kimi" {
+	if !ok || !kimi.Launchable() || !strings.HasPrefix(kimi.Image, "ghcr.io/quoiner/sandbox-kimi@sha256:") || kimi.Command[0] != "kimi" {
 		t.Fatalf("kimi=%+v ok=%v", kimi, ok)
 	}
 	if cline, ok := r.Lookup("cline"); !ok || cline.Launchable() {
