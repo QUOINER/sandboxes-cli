@@ -4,7 +4,7 @@ package command
 
 import (
 	"context"
-	sdk "github.com/QUOINER/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 	"os"
 )
 
