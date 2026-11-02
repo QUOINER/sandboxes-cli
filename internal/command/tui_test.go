@@ -7,22 +7,26 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
 	"github.com/gdamore/tcell/v3"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 type dashboardTestScreen struct {
 	width, height int
 	cells         map[[2]int]rune
 	events        chan tcell.Event
+	stopped       chan struct{}
 }
 
 func newDashboardTestScreen(width, height int) *dashboardTestScreen {
-	return &dashboardTestScreen{width: width, height: height, cells: make(map[[2]int]rune), events: make(chan tcell.Event, 1)}
+	return &dashboardTestScreen{
+		width: width, height: height, cells: make(map[[2]int]rune),
+		events: make(chan tcell.Event, 1), stopped: make(chan struct{}),
+	}
 }
 
 func (*dashboardTestScreen) Init() error                { return nil }
-func (*dashboardTestScreen) Fini()                      {}
+func (s *dashboardTestScreen) Fini()                    { close(s.stopped) }
 func (*dashboardTestScreen) Clear()                     {}
 func (*dashboardTestScreen) SetStyle(tcell.Style)       {}
 func (*dashboardTestScreen) Show()                      {}
@@ -30,6 +34,7 @@ func (*dashboardTestScreen) Sync()                      {}
 func (*dashboardTestScreen) SetTitle(string)            {}
 func (s *dashboardTestScreen) Size() (int, int)         { return s.width, s.height }
 func (s *dashboardTestScreen) EventQ() chan tcell.Event { return s.events }
+func (s *dashboardTestScreen) StopQ() <-chan struct{}   { return s.stopped }
 func (s *dashboardTestScreen) PutStrStyled(x, y int, text string, _ tcell.Style) {
 	for i, r := range []rune(text) {
 		if x+i < s.width && y < s.height {
@@ -112,5 +117,38 @@ func TestDashboardKeyNavigationAndQuit(t *testing.T) {
 	}
 	if !dashboardKey(tcell.NewEventKey(tcell.KeyRune, "q", tcell.ModNone), &model, context.Background(), nil) {
 		t.Fatal("q key did not quit the dashboard")
+	}
+}
+
+func TestForwardDashboardEventsStopsWhenDashboardOrScreenStops(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		stopScreen bool
+	}{
+		{name: "dashboard quit"},
+		{name: "screen fini", stopScreen: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			done := make(chan struct{})
+			screenStopped := make(chan struct{})
+			queue := make(chan tcell.Event)
+			events := make(chan tcell.Event)
+			go forwardDashboardEvents(done, screenStopped, queue, events)
+
+			if test.stopScreen {
+				close(screenStopped)
+			} else {
+				close(done)
+			}
+
+			select {
+			case _, ok := <-events:
+				if ok {
+					t.Fatal("event forwarder stayed open after shutdown")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("event forwarder did not stop")
+			}
+		})
 	}
 }

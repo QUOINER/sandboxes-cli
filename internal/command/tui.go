@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
 	"github.com/gdamore/tcell/v3"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 const tuiUsage = `usage: qsbx tui [--refresh DURATION]
@@ -121,21 +121,7 @@ func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client
 
 	done := make(chan struct{})
 	events := make(chan tcell.Event, 1)
-	eventQueue := screen.EventQ()
-	go func() {
-		defer close(events)
-		for {
-			ev, ok := <-eventQueue
-			if !ok {
-				return
-			}
-			select {
-			case events <- ev:
-			case <-done:
-				return
-			}
-		}
-	}()
+	go forwardDashboardEvents(done, dashboardScreenStopQ(screen), screen.EventQ(), events)
 	defer close(done)
 
 	ticker := time.NewTicker(refreshEvery)
@@ -149,6 +135,37 @@ func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client
 		case ev, ok := <-events:
 			if handleDashboardEvent(ev, ok, screen, client, ctx, &model) {
 				return 0
+			}
+		}
+	}
+}
+
+func dashboardScreenStopQ(screen dashboardScreen) <-chan struct{} {
+	stopper, ok := screen.(interface{ StopQ() <-chan struct{} })
+	if !ok {
+		return nil
+	}
+	return stopper.StopQ()
+}
+
+func forwardDashboardEvents(done, screenStopped <-chan struct{}, eventQueue <-chan tcell.Event, events chan<- tcell.Event) {
+	defer close(events)
+	for {
+		select {
+		case <-done:
+			return
+		case <-screenStopped:
+			return
+		case event, ok := <-eventQueue:
+			if !ok {
+				return
+			}
+			select {
+			case events <- event:
+			case <-done:
+				return
+			case <-screenStopped:
+				return
 			}
 		}
 	}
