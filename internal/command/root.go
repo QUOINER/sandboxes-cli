@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/QUOINER/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 
-	"github.com/QUOINER/sandboxes-cli/internal/kit"
+	"github.com/quoiner/sandboxes-cli/internal/kit"
 )
 
 const (

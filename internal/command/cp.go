@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	sdk "github.com/QUOINER/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 const cpUsage = `usage: qsbx cp SRC DST

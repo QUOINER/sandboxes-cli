@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	sdk "github.com/QUOINER/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 var serviceEnvVars = map[string][]string{

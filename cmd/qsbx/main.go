@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/QUOINER/sandboxes-cli/internal/command"
+	"github.com/quoiner/sandboxes-cli/internal/command"
 )
 
 func main() {
