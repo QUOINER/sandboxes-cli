@@ -265,6 +265,7 @@ func TestSecretHelpAndAlias(t *testing.T) {
 
 type fakeClient struct {
 	registry   *fakeRegistryCredentials
+	secrets    sdk.SecretService
 	sandbox    sdk.SandboxService
 	operations sdk.OperationService
 	accounts   sdk.AccountService
@@ -307,6 +308,7 @@ func (f fakeClient) RegistryCredentials() sdk.RegistryCredentialService {
 	}
 	return f.registry
 }
+func (f fakeClient) SecretService() sdk.SecretService { return f.secrets }
 func (f fakeClient) AccountService() sdk.AccountService {
 	if f.accounts == nil {
 		return nil
