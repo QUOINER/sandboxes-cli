@@ -40,3 +40,11 @@ jobs:
           subject-name: ghcr.io/quoiner/sandbox-codex
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
+      - name: Verify published image provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh attestation verify
+          oci://ghcr.io/quoiner/sandbox-codex@${{ steps.publish.outputs.digest }}
+          --repo quoiner/sandboxes-cli
+          --signer-workflow quoiner/sandboxes-cli/.github/workflows/codex-image.yml

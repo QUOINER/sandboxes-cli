@@ -35,3 +35,11 @@ jobs:
           subject-name: ghcr.io/quoiner/sandbox-dsh-preview
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+      - name: Verify published image provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh attestation verify
+          oci://ghcr.io/quoiner/sandbox-dsh-preview@${{ steps.push.outputs.digest }}
+          --repo quoiner/sandboxes-cli
+          --signer-workflow quoiner/sandboxes-cli/.github/workflows/dsh-image.yml
