@@ -12,8 +12,8 @@ jobs:
         run: |
           set -eux
           echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker pull --platform linux/arm64 docker/sandbox-templates:codex-docker
-          cid=$(docker create --platform linux/arm64 docker/sandbox-templates:codex-docker)
+          docker pull --platform linux/arm64 docker/sandbox-templates@sha256:982f4518e7e5544e92a23e7fb7eaca9cd5ce9c7178782155a628c92ed723d9de
+          cid=$(docker create --platform linux/arm64 docker/sandbox-templates@sha256:982f4518e7e5544e92a23e7fb7eaca9cd5ce9c7178782155a628c92ed723d9de)
           docker export "$cid" -o rootfs.tar
           docker rm "$cid"
           tar --format=ustar --transform='s,^,dev/,' -rf rootfs.tar -C /dev null zero random urandom
