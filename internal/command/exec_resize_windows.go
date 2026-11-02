@@ -4,8 +4,9 @@ package command
 
 import (
 	"context"
-	sdk "github.com/quoiner/sandboxes-go-sdk"
 	"os"
+
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 )
 
 func watchTerminalResize(context.Context, *os.File, sdk.ExecSession) func() { return func() {} }

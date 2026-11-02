@@ -102,7 +102,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func (r *Runner) Run(ctx context.Context, args []string) int {
 	global := flag.NewFlagSet("qsbx", flag.ContinueOnError)
 	global.SetOutput(io.Discard)
-	socket := global.String("socket", r.Socket, "daemon unix socket")
+	socket := global.String("socket", r.Socket, "local daemon endpoint")
 	if err := global.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			r.usage()
@@ -1311,7 +1311,7 @@ func (r *Runner) printSandbox(sb *sdk.Sandbox) {
 func (r *Runner) usage() {
 	_, _ = fmt.Fprintln(r.Out, "usage: qsbx [--socket PATH] <command>")
 	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
-	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  daemon unix socket")
+	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  local daemon endpoint")
 	_, _ = fmt.Fprintln(r.Out, `Use "qsbx <command> --help" for command details.`)
 }
 
