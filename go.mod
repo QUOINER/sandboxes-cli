@@ -3,13 +3,14 @@ module github.com/quoiner/sandboxes-cli
 go 1.27
 
 require (
-	github.com/quoiner/sandboxes-go-sdk v0.0.11
+	github.com/quoiner/sandboxes-go-sdk v0.0.12
 	golang.org/x/term v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/quoiner/sandboxes-api v0.0.10 // indirect
+	github.com/Microsoft/go-winio v0.6.4 // indirect
+	github.com/quoiner/sandboxes-api v0.0.12 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
