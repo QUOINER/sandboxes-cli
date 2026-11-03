@@ -213,8 +213,14 @@ func TestRunHelpExitsZero(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"run", "--help"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "usage: qsbx run") || !strings.Contains(out.String(), "shell") {
+	help := out.String()
+	if !strings.Contains(help, "usage: qsbx run") || !strings.Contains(help, "shell") {
 		t.Fatalf("unexpected help: %q", out.String())
+	}
+	for _, expected := range []string{"[PATH...]", "--kit FILE", "--deny-write PATH", "HOST_IP:]HOST_PORT", "tcp6|udp6"} {
+		if !strings.Contains(help, expected) {
+			t.Errorf("run help omitted %q: %q", expected, help)
+		}
 	}
 }
 
