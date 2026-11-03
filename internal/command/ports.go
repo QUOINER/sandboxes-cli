@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 const (
@@ -280,7 +280,7 @@ func (r *Runner) ports(ctx context.Context, args []string) int {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx ports [--publish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO]] [--unpublish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO]] [--format table|json|yaml] SANDBOX")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx ports [--publish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO]] [--unpublish [[HOST_IP:]HOST_PORT:]GUEST[/PROTO]] [--format table|json|yaml] SANDBOX")
 		return 2
 	}
 	if len(publishFlags) > 0 || len(unpublishFlags) > 0 {

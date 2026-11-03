@@ -16,8 +16,8 @@ func TestRegistry(t *testing.T) {
 		if !ok || !strings.HasPrefix(spec.Image, "ghcr.io/") {
 			continue
 		}
-		if !strings.HasPrefix(spec.Image, "ghcr.io/quoiner/") {
-			t.Errorf("agent %q uses a non-QUOINER GHCR image: %q", name, spec.Image)
+		if !strings.HasPrefix(spec.Image, "ghcr.io/lickren/") {
+			t.Errorf("agent %q uses a non-LICKREN GHCR image: %q", name, spec.Image)
 		}
 		_, digest, pinned := strings.Cut(spec.Image, "@sha256:")
 		decoded, decodeErr := hex.DecodeString(digest)
@@ -26,7 +26,7 @@ func TestRegistry(t *testing.T) {
 		}
 	}
 	kimi, ok := r.Lookup("kimi")
-	if !ok || !kimi.Launchable() || !strings.HasPrefix(kimi.Image, "ghcr.io/quoiner/sandbox-kimi@sha256:") || kimi.Command[0] != "kimi" {
+	if !ok || !kimi.Launchable() || !strings.HasPrefix(kimi.Image, "ghcr.io/lickren/sandbox-kimi@sha256:") || kimi.Command[0] != "kimi" {
 		t.Fatalf("kimi=%+v ok=%v", kimi, ok)
 	}
 	if cline, ok := r.Lookup("cline"); !ok || cline.Launchable() {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 type twoSandbox struct{ fakeSandbox }
@@ -113,7 +113,7 @@ func TestListHelpExitsZero(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"ls", "--help"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "usage: qsbx ls") {
+	if !strings.Contains(out.String(), "usage: lsbx ls") {
 		t.Fatalf("missing help: %q", out.String())
 	}
 }

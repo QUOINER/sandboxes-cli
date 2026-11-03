@@ -12,9 +12,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 
-	"github.com/quoiner/sandboxes-cli/internal/version"
+	"github.com/lickren/sandboxes-cli/internal/version"
 )
 
 type diagnoseReport struct {
@@ -31,7 +31,7 @@ type diagnoseReport struct {
 	Error      string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
-const diagnoseUsage = "usage: qsbx diagnose [--format table|json|yaml] [--json]"
+const diagnoseUsage = "usage: lsbx diagnose [--format table|json|yaml] [--json]"
 
 func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)

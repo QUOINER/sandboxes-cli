@@ -5,12 +5,12 @@ agents:
     command: ["/bin/sh"]
     status: available
   - name: kimi
-    image: ghcr.io/quoiner/sandbox-kimi@sha256:b81684d2216bfa6b5a99872ee3917cf6e25e039bf5a61d47171ebcaaf0a46203
+    image: ghcr.io/lickren/sandbox-kimi@sha256:b81684d2216bfa6b5a99872ee3917cf6e25e039bf5a61d47171ebcaaf0a46203
     command: ["kimi"]
     status: available
     notes: public pinned image; live-tested on the released CLI
   - name: codex
-    image: ghcr.io/quoiner/sandbox-codex@sha256:9e691b40406f264fd63f9e0d48c50fcaa0dff34acdc51dceeaaa63929ea8d652
+    image: ghcr.io/lickren/sandbox-codex@sha256:9e691b40406f264fd63f9e0d48c50fcaa0dff34acdc51dceeaaa63929ea8d652
     command: ["codex"]
     status: available
     docker: true
@@ -24,7 +24,7 @@ agents:
     command: ["opencode"]
     status: preview
   - name: dsh
-    image: ghcr.io/quoiner/sandbox-dsh-preview@sha256:f37c7065aca89c14b0b45418c68cda74b451047688a34df6364694381d97d772
+    image: ghcr.io/lickren/sandbox-dsh-preview@sha256:f37c7065aca89c14b0b45418c68cda74b451047688a34df6364694381d97d772
     command: ["dsh", "web"]
     status: preview
     default_ports: ["8080/tcp4"]

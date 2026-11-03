@@ -1,16 +1,21 @@
-module github.com/quoiner/sandboxes-cli
+module github.com/lickren/sandboxes-cli
 
 go 1.27
 
 require (
-	github.com/quoiner/sandboxes-go-sdk v0.0.12
+	github.com/gdamore/tcell/v3 v3.4.1
+	github.com/lickren/sandboxes-go-sdk v0.0.13
 	golang.org/x/term v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/Microsoft/go-winio v0.6.4 // indirect
-	github.com/quoiner/sandboxes-api v0.0.12 // indirect
+	github.com/clipperhouse/displaywidth v0.11.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/gdamore/encoding v1.0.1 // indirect
+	github.com/lickren/sandboxes-api v0.0.13 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect

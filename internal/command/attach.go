@@ -11,7 +11,7 @@ import (
 	"golang.org/x/term"
 )
 
-const attachUsage = `Usage: qsbx attach [--shell] SANDBOX
+const attachUsage = `Usage: lsbx attach [--shell] SANDBOX
 
 Attach to a sandbox, starting it first if it is stopped. The sandbox's agent
 command is used unless --shell is set.

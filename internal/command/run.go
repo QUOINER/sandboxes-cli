@@ -15,11 +15,11 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 const (
-	runUsage = `usage: qsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]
+	runUsage = `usage: lsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]
 
 Create a sandbox (or reuse one by --name), start it, and attach to an agent.
 The default workspace is the current directory. Pass additional workspace paths
@@ -142,10 +142,10 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	opts, positionals, err := parseRunArgs(head)
 	if err != nil {
 		if flagErr, ok := asUnknownRunFlag(err); ok {
-			_, _ = fmt.Fprintf(r.Err, "error: unknown flag: --%s\n  try: qsbx run --help\n", strings.TrimLeft(flagErr.flag, "-"))
+			_, _ = fmt.Fprintf(r.Err, "error: unknown flag: --%s\n  try: lsbx run --help\n", strings.TrimLeft(flagErr.flag, "-"))
 			return 1
 		}
-		_, _ = fmt.Fprintf(r.Err, "qsbx run: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "lsbx run: %v\n", err)
 		_, _ = fmt.Fprint(r.Err, runUsage)
 		return 2
 	}
@@ -155,12 +155,12 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	}
 	agent, workspacePaths, workspacesExplicit, err := parseRunPositionals(positionals)
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "qsbx run: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "lsbx run: %v\n", err)
 		return 2
 	}
 	if opts.kit != "" {
 		if err := applyKit(ctx, opts.kit, &agent, &opts.image, &opts.profile, &workspacePaths); err != nil {
-			_, _ = fmt.Fprintf(r.Err, "qsbx run: %v\n", err)
+			_, _ = fmt.Fprintf(r.Err, "lsbx run: %v\n", err)
 			return 2
 		}
 		workspacesExplicit = true
@@ -172,7 +172,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		workspacesExplicit = true
 	}
 	if err := validateRunRequest(opts, agent); err != nil {
-		_, _ = fmt.Fprintf(r.Err, "qsbx run: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "lsbx run: %v\n", err)
 		if errors.Is(err, errRunAgentRequired) {
 			_, _ = fmt.Fprint(r.Err, runUsage)
 		}
@@ -184,7 +184,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 	}
 	resources, err := prepareRunResources(opts)
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "qsbx run: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "lsbx run: %v\n", err)
 		return 2
 	}
 

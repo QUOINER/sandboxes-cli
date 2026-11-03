@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 type runClient struct {
@@ -214,7 +214,7 @@ func TestRunHelpExitsZero(t *testing.T) {
 		t.Fatalf("exit=%d", code)
 	}
 	help := out.String()
-	if !strings.Contains(help, "usage: qsbx run") || !strings.Contains(help, "shell") {
+	if !strings.Contains(help, "usage: lsbx run") || !strings.Contains(help, "shell") {
 		t.Fatalf("unexpected help: %q", out.String())
 	}
 	for _, expected := range []string{"[PATH...]", "--kit FILE", "--deny-write PATH", "HOST_IP:]HOST_PORT", "tcp6|udp6"} {
@@ -303,7 +303,7 @@ func TestRunUnknownFlagUsesSharedErrorContract(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"run", "--bogus", "shell", "."}); code != 1 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") || !strings.Contains(stderr.String(), "  try: qsbx run --help") {
+	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") || !strings.Contains(stderr.String(), "  try: lsbx run --help") {
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 }

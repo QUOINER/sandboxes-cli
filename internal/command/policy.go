@@ -18,7 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 type policyRuleOutput struct {
@@ -62,13 +62,13 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 	case "profile":
 		return r.policyProfile(ctx, args[1:])
 	case commandReset, "refresh", "log", "approval":
-		_, _ = fmt.Fprintf(r.Err, "qsbx policy %s: this policy operation is not implemented\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "lsbx policy %s: this policy operation is not implemented\n", args[0])
 		return 1
 	case helpCommand, helpShort, helpFlag:
 		_, _ = fmt.Fprint(r.Out, policyUsage)
 		return 0
 	default:
-		_, _ = fmt.Fprintf(r.Err, "qsbx policy: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "lsbx policy: unknown subcommand %q\n", args[0])
 		_, _ = fmt.Fprint(r.Err, policyUsage)
 		return 2
 	}
@@ -96,7 +96,7 @@ func (r *Runner) policyMutateNetwork(ctx context.Context, action string, args []
 		return code
 	}
 	if len(rest) != 1 {
-		_, _ = fmt.Fprintf(r.Err, "usage: qsbx policy %s network [--sandbox NAME] CIDR[:PORT]|DOMAIN\n", action)
+		_, _ = fmt.Fprintf(r.Err, "usage: lsbx policy %s network [--sandbox NAME] CIDR[:PORT]|DOMAIN\n", action)
 		return 2
 	}
 	if sandboxName == "" {
@@ -141,7 +141,7 @@ func (r *Runner) policyCheckNetwork(ctx context.Context, args []string) int {
 		return code
 	}
 	if len(rest) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx policy check network [--sandbox NAME] TARGET (IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s)://URL)")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx policy check network [--sandbox NAME] TARGET (IPv4[:PORT], IPv6[:PORT], domain[:PORT], or http(s)://URL)")
 		return 2
 	}
 	host, port, err := parsePolicyTarget(rest[0])
@@ -368,7 +368,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 		return r.flagParseFailure("policy ls", err)
 	}
 	if fs.NArg() > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx policy ls [--format table|json|yaml] [SANDBOX]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx policy ls [--format table|json|yaml] [SANDBOX]")
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -410,7 +410,7 @@ func (r *Runner) policyList(ctx context.Context, args []string) int {
 
 func (r *Runner) policyInit(ctx context.Context, args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx policy init allow-all|balanced|deny-all")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx policy init allow-all|balanced|deny-all")
 		return 2
 	}
 	profile := args[0]
@@ -435,7 +435,7 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 
 func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 	if len(args) > 1 || (len(args) == 1 && args[0] != "ls" && args[0] != commandList) {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx policy profile [ls]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx policy profile [ls]")
 		return 2
 	}
 	client, err := r.client()
@@ -455,7 +455,7 @@ func (r *Runner) policyProfile(ctx context.Context, args []string) int {
 
 func (r *Runner) policyMutate(ctx context.Context, action string, args []string) int {
 	if len(args) != 2 {
-		_, _ = fmt.Fprintf(r.Err, "usage: qsbx policy %s SANDBOX CIDR[:PORT]\n", action)
+		_, _ = fmt.Fprintf(r.Err, "usage: lsbx policy %s SANDBOX CIDR[:PORT]\n", action)
 		return 2
 	}
 	rule, err := parseNetworkRule(args[1])
@@ -485,7 +485,7 @@ func (r *Runner) policyMutate(ctx context.Context, action string, args []string)
 
 func (r *Runner) policyCheck(ctx context.Context, args []string) int {
 	if len(args) != 3 && len(args) != 4 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx policy check SANDBOX CIDR PORT [PROTOCOL]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx policy check SANDBOX CIDR PORT [PROTOCOL]")
 		return 2
 	}
 	protocol := tcpProtocol
@@ -576,7 +576,7 @@ func (r *Runner) policyCheckFilesystem(ctx context.Context, args []string) int {
 		return r.flagParseFailure("policy check filesystem", err)
 	}
 	if *sandboxName == "" || fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx policy check filesystem --sandbox NAME [--write] PATH")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx policy check filesystem --sandbox NAME [--write] PATH")
 		return 2
 	}
 	target := path.Clean(fs.Arg(0))
@@ -734,7 +734,7 @@ func evaluatePolicy(allow, deny []sdk.NetworkRule, protocol string, ip net.IP, p
 
 const filesystemKeyword = "filesystem"
 
-const policyUsage = `Usage: qsbx policy COMMAND
+const policyUsage = `Usage: lsbx policy COMMAND
 
 Commands:
   ls [SANDBOX] [--format table|json|yaml] list global and sandbox allow/deny rules

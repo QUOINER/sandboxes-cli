@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quoiner/sandboxes-cli/internal/version"
+	"github.com/lickren/sandboxes-cli/internal/version"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 // TestLsUnknownFlagUsesSharedErrorContract covers PARITY P-34.
@@ -24,7 +24,7 @@ func TestLsUnknownFlagUsesSharedErrorContract(t *testing.T) {
 		t.Fatalf("exit=%d", code)
 	}
 	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") ||
-		!strings.Contains(stderr.String(), "  try: qsbx ls --help") {
+		!strings.Contains(stderr.String(), "  try: lsbx ls --help") {
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 }
@@ -239,7 +239,7 @@ func TestVersionCommandText(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"version"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "qsbx version v"+version.Version) {
+	if !strings.Contains(out.String(), "lsbx version v"+version.Version) {
 		t.Fatalf("output=%q", out.String())
 	}
 }
