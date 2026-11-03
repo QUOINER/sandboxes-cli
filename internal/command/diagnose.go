@@ -31,7 +31,7 @@ type diagnoseReport struct {
 	Error      string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
-const diagnoseUsage = "usage: ksbx diagnose [--format table|json|yaml] [--json]"
+const diagnoseUsage = "usage: qsbx diagnose [--format table|json|yaml] [--json]"
 
 func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)

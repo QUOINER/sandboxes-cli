@@ -48,11 +48,11 @@ func completionCommands() []string {
 
 func (r *Runner) completion(args []string) int {
 	if len(args) == 1 && (args[0] == helpCommand || args[0] == helpShort || args[0] == helpFlag) {
-		_, _ = fmt.Fprint(r.Out, "usage: ksbx completion bash|zsh|fish|powershell\n")
+		_, _ = fmt.Fprint(r.Out, "usage: qsbx completion bash|zsh|fish|powershell\n")
 		return 0
 	}
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx completion bash|zsh|fish|powershell")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx completion bash|zsh|fish|powershell")
 		return 2
 	}
 	script, err := completionScript(args[0])
@@ -81,8 +81,8 @@ func completionScript(shell string) (string, error) {
 
 func bashCompletionScript() string {
 	var b strings.Builder
-	b.WriteString(`# bash completion for ksbx
-_ksbx_completion() {
+	b.WriteString(`# bash completion for qsbx
+_qsbx_completion() {
   local cur prev cmd
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
@@ -124,14 +124,14 @@ _ksbx_completion() {
 	b.WriteString(`    *) COMPREPLY=() ;;
   esac
 }
-complete -F _ksbx_completion ksbx
+complete -F _qsbx_completion qsbx
 `)
 	return b.String()
 }
 
 func zshCompletionScript() string {
 	var b strings.Builder
-	b.WriteString("#compdef ksbx\n\n_ksbx() {\n  local -a commands\n  commands=(")
+	b.WriteString("#compdef qsbx\n\n_qsbx() {\n  local -a commands\n  commands=(")
 	b.WriteString(strings.Join(completionCommands(), " "))
 	b.WriteString(")\n\n  local cmd\n  cmd=\"${words[2]}\"\n\n  case \"$cmd\" in\n")
 	for _, name := range sortedKeys(completionTree) {
@@ -148,23 +148,23 @@ func zshCompletionScript() string {
   esac
 }
 
-compdef _ksbx ksbx
+compdef _qsbx qsbx
 `)
 	return b.String()
 }
 
 func fishCompletionScript() string {
 	var b strings.Builder
-	b.WriteString("complete -c ksbx -f\n")
+	b.WriteString("complete -c qsbx -f\n")
 	for _, name := range completionCommands() {
-		fmt.Fprintf(&b, "complete -c ksbx -n '__fish_use_subcommand' -a %s\n", name)
+		fmt.Fprintf(&b, "complete -c qsbx -n '__fish_use_subcommand' -a %s\n", name)
 	}
 	for _, name := range sortedKeys(completionTree) {
 		for _, flag := range completionTree[name] {
-			fmt.Fprintf(&b, "complete -c ksbx -n '__fish_seen_subcommand_from %s' -l %s\n", name, strings.TrimLeft(flag, "-"))
+			fmt.Fprintf(&b, "complete -c qsbx -n '__fish_seen_subcommand_from %s' -l %s\n", name, strings.TrimLeft(flag, "-"))
 		}
 		for _, sub := range completionSubcommands[name] {
-			fmt.Fprintf(&b, "complete -c ksbx -n '__fish_seen_subcommand_from %s' -a %s\n", name, sub)
+			fmt.Fprintf(&b, "complete -c qsbx -n '__fish_seen_subcommand_from %s' -a %s\n", name, sub)
 		}
 	}
 	return b.String()
@@ -172,7 +172,7 @@ func fishCompletionScript() string {
 
 func powershellCompletionScript() string {
 	var b strings.Builder
-	b.WriteString("Register-ArgumentCompleter -Native -CommandName ksbx -ScriptBlock {\n  param($wordToComplete, $commandAst, $cursorPosition)\n")
+	b.WriteString("Register-ArgumentCompleter -Native -CommandName qsbx -ScriptBlock {\n  param($wordToComplete, $commandAst, $cursorPosition)\n")
 	b.WriteString("  $commands = @(")
 	b.WriteString(strings.Join(quotedCommands(), ", "))
 	b.WriteString(")\n")

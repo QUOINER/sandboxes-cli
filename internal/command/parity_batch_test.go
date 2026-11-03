@@ -24,7 +24,7 @@ func TestLsUnknownFlagUsesSharedErrorContract(t *testing.T) {
 		t.Fatalf("exit=%d", code)
 	}
 	if !strings.Contains(stderr.String(), "error: unknown flag: --bogus") ||
-		!strings.Contains(stderr.String(), "  try: ksbx ls --help") {
+		!strings.Contains(stderr.String(), "  try: qsbx ls --help") {
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 }
@@ -239,7 +239,7 @@ func TestVersionCommandText(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"version"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	if !strings.Contains(out.String(), "ksbx version v"+version.Version) {
+	if !strings.Contains(out.String(), "qsbx version v"+version.Version) {
 		t.Fatalf("output=%q", out.String())
 	}
 }

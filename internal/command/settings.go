@@ -17,7 +17,7 @@ import (
 	"github.com/KLORQ/sandboxes-cli/internal/settings"
 )
 
-const settingsUsage = `Usage: ksbx settings COMMAND
+const settingsUsage = `Usage: qsbx settings COMMAND
 
 View and manage local Klorq settings in ~/.config/klorq/settings.toml.
 
@@ -62,7 +62,7 @@ func (r *Runner) settings(args []string) int {
 	case "unset":
 		return r.settingsUnset(args[1:])
 	default:
-		_, _ = fmt.Fprintf(r.Err, "ksbx settings: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "qsbx settings: unknown subcommand %q\n", args[0])
 		_, _ = fmt.Fprint(r.Err, settingsUsage)
 		return 2
 	}
@@ -87,7 +87,7 @@ func (r *Runner) settingsList(args []string) int {
 		return r.flagParseFailure("settings ls", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx settings ls [--format table|json|yaml]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx settings ls [--format table|json|yaml]")
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -168,7 +168,7 @@ func uintString(value uint32) string {
 
 func (r *Runner) settingsGet(args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx settings get KEY")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx settings get KEY")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -187,7 +187,7 @@ func (r *Runner) settingsGet(args []string) int {
 
 func (r *Runner) settingsSet(args []string) int {
 	if len(args) != 2 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx settings set KEY VALUE")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx settings set KEY VALUE")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -212,7 +212,7 @@ func (r *Runner) settingsSet(args []string) int {
 
 func (r *Runner) settingsUnset(args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx settings unset KEY")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx settings unset KEY")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())

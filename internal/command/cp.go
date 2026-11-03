@@ -15,7 +15,7 @@ import (
 	sdk "github.com/KLORQ/sandboxes-go-sdk"
 )
 
-const cpUsage = `usage: ksbx cp SRC DST
+const cpUsage = `usage: qsbx cp SRC DST
 
 Copy one file or directory between the host and a sandbox. Exactly one side
 must be SANDBOX:PATH with an absolute guest path. The destination is the exact

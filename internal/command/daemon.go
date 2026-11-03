@@ -11,7 +11,7 @@ import (
 	sdk "github.com/KLORQ/sandboxes-go-sdk"
 )
 
-const daemonUsage = `Usage: ksbx daemon COMMAND
+const daemonUsage = `Usage: qsbx daemon COMMAND
 
 Commands:
   status [--json]   show socket, version and sandbox counts
@@ -33,10 +33,10 @@ func (r *Runner) daemon(args []string) int {
 	case "status":
 		return r.daemonStatus(args[1:])
 	case "start", "stop", "restart", "log-level":
-		_, _ = fmt.Fprintf(r.Err, "ksbx daemon %s: not implemented; this build does not install or supervise a host service\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "qsbx daemon %s: not implemented; this build does not install or supervise a host service\n", args[0])
 		return 1
 	default:
-		_, _ = fmt.Fprintf(r.Err, "ksbx daemon: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "qsbx daemon: unknown subcommand %q\n", args[0])
 		return 2
 	}
 }
@@ -64,7 +64,7 @@ func (r *Runner) daemonStatus(args []string) int {
 		return r.flagParseFailure("daemon status", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: ksbx daemon status [--json]")
+		_, _ = fmt.Fprintln(r.Err, "usage: qsbx daemon status [--json]")
 		return 2
 	}
 	out := daemonStatusOutput{Socket: r.Socket, State: stateUnavailable}
