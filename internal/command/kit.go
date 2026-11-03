@@ -19,7 +19,7 @@ import (
 
 const kitUsage = `Usage: lsbx kit COMMAND
 
-Manage local kit files (klorq.dev/v1alpha1). Kits are unsigned local files;
+Manage local kit files (lickren.dev/v1alpha1). Kits are unsigned local files;
 remote OCI kits, seeds, signatures and MCP allowlists are not implemented yet.
 
 Commands:

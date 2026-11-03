@@ -28,7 +28,7 @@ agents:
     command: ["dsh", "web"]
     status: preview
     default_ports: ["8080/tcp4"]
-    detach_command: ["/bin/sh", "-c", "nohup /usr/local/bin/klorq-dsh-entrypoint >/tmp/klorq-dsh.log 2>&1 &"]
+    detach_command: ["/bin/sh", "-c", "nohup /usr/local/bin/lickren-dsh-entrypoint >/tmp/lickren-dsh.log 2>&1 &"]
     notes: DeepSeek Harness web UI on guest port 8080, published on 127.0.0.1 by default
   - name: claude
     image: docker/sandbox-templates:claude-code-docker

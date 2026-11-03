@@ -19,7 +19,7 @@ import (
 
 const settingsUsage = `Usage: lsbx settings COMMAND
 
-View and manage local Klorq settings in ~/.config/klorq/settings.toml.
+View and manage local Lickren settings in ~/.config/lickren/settings.toml.
 
 Commands:
   ls [--format table|json|yaml]   list settings and their effective source
@@ -69,7 +69,7 @@ func (r *Runner) settings(args []string) int {
 }
 
 func (r *Runner) settingsPath() string {
-	if path := strings.TrimSpace(os.Getenv("KLORQ_SETTINGS_FILE")); path != "" {
+	if path := strings.TrimSpace(os.Getenv("LICKREN_SETTINGS_FILE")); path != "" {
 		return path
 	}
 	return settings.DefaultPath()
@@ -205,7 +205,7 @@ func (r *Runner) settingsSet(args []string) int {
 	}
 	_, _ = fmt.Fprintf(r.Out, "set %s\n", args[0])
 	if restart := settingRestart(args[0]); restart {
-		_, _ = fmt.Fprintf(r.Out, "restart klorqd to apply %s\n", args[0])
+		_, _ = fmt.Fprintf(r.Out, "restart lickrend to apply %s\n", args[0])
 	}
 	return 0
 }

@@ -12,7 +12,7 @@ func TestRoundTrip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows ACL validation is not implemented; Load remains fail closed")
 	}
-	path := filepath.Join(t.TempDir(), "klorq", "settings.toml")
+	path := filepath.Join(t.TempDir(), "lickren", "settings.toml")
 	want := Values{DNSUpstream: "1.1.1.1:53", DefaultPolicyProfile: "balanced", DefaultCPUs: 4, DefaultMemoryMiB: 2048, DockerVolumeSize: "20g"}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)

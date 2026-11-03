@@ -141,7 +141,7 @@ func copyHostToGuest(ctx context.Context, client sdk.Client, sandboxID, hostSour
 	defer cancel()
 	session, err := sdk.Sessions(client).OpenSession(ctx, sdk.SessionRequest{
 		SandboxID: sandboxID,
-		Argv:      []string{shellPath, "-c", `mkdir -p "$1" && exec tar -xf - -C "$1"`, "klorq-cp", parent},
+		Argv:      []string{shellPath, "-c", `mkdir -p "$1" && exec tar -xf - -C "$1"`, "lickren-cp", parent},
 	})
 	if err != nil {
 		return err
@@ -334,7 +334,7 @@ func guestDirectoryExists(ctx context.Context, client sdk.Client, sandboxID, gue
 	var stderr bytes.Buffer
 	code, err := sdk.ExecService(client).Exec(ctx, sdk.ExecRequest{
 		SandboxID: sandboxID,
-		Argv:      []string{shellPath, "-c", `test -d "$1"`, "klorq-cp", guestPath},
+		Argv:      []string{shellPath, "-c", `test -d "$1"`, "lickren-cp", guestPath},
 		Stdout:    io.Discard,
 		Stderr:    &stderr,
 	})

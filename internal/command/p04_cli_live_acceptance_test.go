@@ -1,4 +1,4 @@
-//go:build darwin && arm64 && klorq_p04_cli_live
+//go:build darwin && arm64 && lickren_p04_cli_live
 
 package command
 
@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const p04CLISyntheticSecret = "klorq-p04-cli-synthetic-credential"
+const p04CLISyntheticSecret = "lickren-p04-cli-synthetic-credential"
 
 func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	inputs := getP04CLIInputs(t)
@@ -179,7 +179,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 		t.Fatal("CLI run did not return the owned sandbox ID")
 	}
 	brokerSocket = p04CLIBrokerSocket(sandboxID)
-	checkEnv := `test "$OPENAI_API_KEY" = klorq-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
+	checkEnv := `test "$OPENAI_API_KEY" = lickren-proxy-placeholder && test "$OPENAI_BASE_URL" = http://127.0.0.1:3128/v1`
 	execWithProxyEnv := func() (string, error) {
 		return runP04CLI(ctx, cliPath, cliSocket, cliEnv, "exec", "--env", "OPENAI_API_KEY=${proxy:openai}", name, "/bin/sh", "-c", checkEnv)
 	}
@@ -364,16 +364,16 @@ func getP04CLIInputs(t *testing.T) p04CLIInputs {
 		}
 		return value
 	}
-	image := os.Getenv("KLORQ_P04_IMAGE")
+	image := os.Getenv("LICKREN_P04_IMAGE")
 	if image == "" {
 		image = "docker.io/library/alpine:3.22"
 	}
 	return p04CLIInputs{
-		containerd: get("KLORQ_P04_CONTAINERD"), ctr: get("KLORQ_P04_CTR"),
-		shim: get("KLORQ_P04_SHIM"), kernel: get("KLORQ_P04_KERNEL"),
-		rootfs: get("KLORQ_P04_ROOTFS"), helper: get("KLORQ_P04_HELPER"),
-		libkrun: get("KLORQ_P04_LIBKRUN"), gvproxy: get("KLORQ_P04_GVPROXY"),
-		daemon: get("KLORQ_P04_DAEMON"), image: image,
+		containerd: get("LICKREN_P04_CONTAINERD"), ctr: get("LICKREN_P04_CTR"),
+		shim: get("LICKREN_P04_SHIM"), kernel: get("LICKREN_P04_KERNEL"),
+		rootfs: get("LICKREN_P04_ROOTFS"), helper: get("LICKREN_P04_HELPER"),
+		libkrun: get("LICKREN_P04_LIBKRUN"), gvproxy: get("LICKREN_P04_GVPROXY"),
+		daemon: get("LICKREN_P04_DAEMON"), image: image,
 	}
 }
 
@@ -470,11 +470,11 @@ func execP04CLIInGuest(ctx context.Context, ctrPath, containerdSocket, fifoDir, 
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return "", err
 	}
-	execID := "klorq-p04-probe-" + hex.EncodeToString(nonce[:])
+	execID := "lickren-p04-probe-" + hex.EncodeToString(nonce[:])
 	args := make([]string, 0, 11+len(argv))
 	args = append(args,
-		"--address", containerdSocket, "--namespace", "klorq", "tasks", "exec",
-		"--exec-id", execID, "--fifo-dir", fifoDir, "klorq-"+sandboxName,
+		"--address", containerdSocket, "--namespace", "lickren", "tasks", "exec",
+		"--exec-id", execID, "--fifo-dir", fifoDir, "lickren-"+sandboxName,
 	)
 	args = append(args, argv...)
 	cmd := exec.CommandContext(ctx, ctrPath, args...)
@@ -495,7 +495,7 @@ func requestP04CLIBrokerToken(ctx context.Context, socket string) error {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker/__klorq/proxy/token", http.NoBody)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://broker/__lickren/proxy/token", http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -522,7 +522,7 @@ func removeP04CLISecret(ctx context.Context, binary, socket string, env []string
 		return nil
 	}
 	account := "openai/sandbox/" + sandboxName
-	security := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", "com.klorq.service-secrets.v1", "-a", account)
+	security := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", "com.lickren.service-secrets.v1", "-a", account)
 	if output, fallbackErr := security.CombinedOutput(); fallbackErr != nil {
 		return fmt.Errorf("daemon cleanup failed: %w; keychain cleanup failed: %w: %s", err, fallbackErr, output)
 	}
@@ -552,8 +552,8 @@ func cleanupP04CLIResources(ctx context.Context, binary, socket string, env []st
 }
 
 func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sandboxName string) error {
-	containerID := "klorq-" + sandboxName
-	containers, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "containers", "list", "-q").Output()
+	containerID := "lickren-" + sandboxName
+	containers, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "lickren", "containers", "list", "-q").Output()
 	if err != nil {
 		return fmt.Errorf("list owned containerd containers: %w", err)
 	}
@@ -567,7 +567,7 @@ func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sand
 	if !found {
 		return nil
 	}
-	tasks, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "tasks", "list", "-q").Output()
+	tasks, err := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "lickren", "tasks", "list", "-q").Output()
 	if err != nil {
 		return fmt.Errorf("list owned containerd tasks: %w", err)
 	}
@@ -575,17 +575,17 @@ func cleanupP04CLIContainer(ctx context.Context, ctrPath, containerdSocket, sand
 		if id != containerID {
 			continue
 		}
-		kill := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "tasks", "kill", "--signal", "SIGKILL", containerID)
+		kill := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "lickren", "tasks", "kill", "--signal", "SIGKILL", containerID)
 		if output, err := kill.CombinedOutput(); err != nil {
 			return fmt.Errorf("kill owned task: %w: %s", err, output)
 		}
-		removeTask := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "tasks", "delete", containerID)
+		removeTask := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "lickren", "tasks", "delete", containerID)
 		if output, err := removeTask.CombinedOutput(); err != nil {
 			return fmt.Errorf("delete owned task: %w: %s", err, output)
 		}
 		break
 	}
-	removeContainer := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "klorq", "containers", "delete", containerID)
+	removeContainer := exec.CommandContext(ctx, ctrPath, "--address", containerdSocket, "--namespace", "lickren", "containers", "delete", containerID)
 	if output, err := removeContainer.CombinedOutput(); err != nil {
 		return fmt.Errorf("delete owned container: %w: %s", err, output)
 	}

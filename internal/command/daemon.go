@@ -17,7 +17,7 @@ Commands:
   status [--json]   show socket, version and sandbox counts
 
 start, stop, restart and log-level are not implemented: this build does not
-install or supervise a host service. Run klorqd/sandboxesd from your process
+install or supervise a host service. Run lickrend/sandboxesd from your process
 manager instead.
 `
 

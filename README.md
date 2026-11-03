@@ -130,7 +130,7 @@ secrets in argv (prefer a bounded, permission-restricted env file).
 
 `lsbx attach [--shell] SANDBOX` starts a stopped sandbox and opens its agent
 session. `lsbx settings ls|get|set|unset` manages
-`~/.config/klorq/settings.toml` (`dns.upstream`, `policy.profile`,
+`~/.config/lickren/settings.toml` (`dns.upstream`, `policy.profile`,
 `defaults.cpus`, `defaults.memory_mib`, `sandbox.disk.dockerVolume`); DNS and
 daemon-owned consumers need a daemon restart. `lsbx secret` stores service API
 keys and registry credentials in the host keychain. Service secret values are
@@ -190,7 +190,7 @@ not listed until they are re-saved.
 using the same Docker public device-flow client as Docker CLI and Docker
 Sandboxes. Login starts device authorization at Docker, opens the browser,
 waits for approval, exchanges the grant for a Docker Hub PAT, and stores the
-credentials in the native host vault. No Klorq OAuth registration is needed.
+credentials in the native host vault. No Lickren OAuth registration is needed.
 For headless login, use `lsbx login --username USER --password-stdin` and pipe a
 Docker Hub password or personal access token into stdin. The daemon validates it
 with Docker Hub before storing it; the token is never accepted as a command-line
@@ -211,7 +211,7 @@ registry or enable authenticated pulls from a sandbox. Registry broker and
 policy enforcement are still under implementation; the command says so on
 success.
 
-`SANDBOXES_SOCKET` can replace the `--socket` flag. Klorq commands and examples use `lsbx`; `sandboxes` is only the repository name. Docker Sandboxes commands are written as `sbx ...` only when explicitly discussing Docker's original product. A Klorq `sbx` compatibility alias is not installed by default; it requires that `command -v sbx` be empty and explicit user consent.
+`SANDBOXES_SOCKET` can replace the `--socket` flag. Lickren commands and examples use `lsbx`; `sandboxes` is only the repository name. Docker Sandboxes commands are written as `sbx ...` only when explicitly discussing Docker's original product. A Lickren `sbx` compatibility alias is not installed by default; it requires that `command -v sbx` be empty and explicit user consent.
 
 ## Development
 
