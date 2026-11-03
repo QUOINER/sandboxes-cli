@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const resetUsage = `Usage: lsbx reset [--force] [--format table|json|yaml]
+const resetUsage = `Usage: rsbx reset [--force] [--format table|json|yaml]
 
 Remove every sandbox owned by the connected daemon. Settings, images and the
 daemon state directory are not deleted. --force skips confirmation.

@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 type pruneOptions struct {
@@ -120,7 +120,7 @@ func parsePruneOptions(args []string) (pruneOptions, bool, error) {
 		return pruneOptions{}, false, flagParseError{err: err}
 	}
 	if fs.NArg() != 0 {
-		return pruneOptions{}, false, errors.New("usage: lsbx prune [--dry-run] [-f|--force] [--format table|json|yaml]")
+		return pruneOptions{}, false, errors.New("usage: rsbx prune [--dry-run] [-f|--force] [--format table|json|yaml]")
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
 	if err != nil {

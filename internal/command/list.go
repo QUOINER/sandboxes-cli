@@ -12,10 +12,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-const listUsage = `usage: lsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]
+const listUsage = `usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]
 
 List sandboxes. table is the default; --json is equivalent to --format json;
 -q prints only names. JSON/YAML fields include name, id, agent, status,
@@ -64,7 +64,7 @@ func (r *Runner) list(ctx context.Context, args []string) int {
 		return r.flagParseFailure("ls", parseErr.err)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "lsbx ls: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "rsbx ls: %v\n", err)
 		return 2
 	}
 	client, err := r.client()
@@ -106,7 +106,7 @@ func parseListOptions(args []string) (listOptions, bool, error) {
 		return listOptions{}, false, flagParseError{err: err}
 	}
 	if fs.NArg() != 0 {
-		return listOptions{}, false, errors.New("usage: lsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]")
+		return listOptions{}, false, errors.New("usage: rsbx ls [--format table|json|yaml] [--json] [-q] [--limit N]")
 	}
 	selected := *format
 	if *jsonOutput {

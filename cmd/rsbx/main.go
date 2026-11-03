@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/lickren/sandboxes-cli/internal/command"
+	"github.com/rheic/sandboxes-cli/internal/command"
 )
 
 func main() {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 type diagnoseSandbox struct {

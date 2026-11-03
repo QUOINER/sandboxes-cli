@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 func TestFollowLinkWorkspaceBoundary(t *testing.T) {

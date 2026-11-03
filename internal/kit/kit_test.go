@@ -11,7 +11,7 @@ import (
 )
 
 func TestDecodeLocalKit(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: klorq.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
 kind: Kit
 metadata: {name: codex-go}
 spec:
@@ -30,8 +30,8 @@ spec:
 
 func TestDecodeRejectsUnsupportedAndUnknown(t *testing.T) {
 	for _, body := range []string{
-		"apiVersion: klorq.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, mcp: {allow: [github]}}\n",
-		"apiVersion: klorq.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, unknown: true}\n",
+		"apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, mcp: {allow: [github]}}\n",
+		"apiVersion: rheic.dev/v1alpha1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex, unknown: true}\n",
 		"apiVersion: v1\nkind: Kit\nmetadata: {name: x}\nspec: {agent: codex}\n",
 	} {
 		if _, err := Decode(strings.NewReader(body)); err == nil {
@@ -60,7 +60,7 @@ func TestSeedValidation(t *testing.T) {
 }
 
 func TestDecodeSeedKit(t *testing.T) {
-	doc, err := Decode(strings.NewReader(`apiVersion: klorq.dev/v1alpha1
+	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
 kind: Kit
 metadata: {name: seeded}
 spec:

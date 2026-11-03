@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v3"
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 type dashboardTestScreen struct {
@@ -61,14 +61,14 @@ func (s *dashboardTestScreen) text() string {
 	return strings.Join(rows, "\n")
 }
 
-func TestDrawDashboardShowsLICKRENBrandAndSandbox(t *testing.T) {
+func TestDrawDashboardShowsRHEICBrandAndSandbox(t *testing.T) {
 	screen := newDashboardTestScreen(100, 24)
 	drawDashboard(screen, dashboardModel{
 		items: []sdk.Sandbox{{Name: "brand-check", ID: "sbx_test", State: "running", Agent: "shell", Image: "alpine:latest", Workspace: "/workspace"}},
 	})
 
 	output := screen.text()
-	for _, want := range []string{"LICKREN", "LOCAL SANDBOXES", "SANDBOXES", "brand-check", "running", "↑/↓ or j/k", "◉"} {
+	for _, want := range []string{"RHEIC", "LOCAL SANDBOXES", "SANDBOXES", "brand-check", "running", "↑/↓ or j/k", "◉"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("dashboard does not contain %q", want)
 		}
@@ -102,7 +102,7 @@ func TestTUIHelpDoesNotConnectToDaemon(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"tui", "--help"}); code != 0 {
 		t.Fatalf("Run(tui --help) = %d, stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "LICKREN sandbox dashboard") {
+	if !strings.Contains(stdout.String(), "RHEIC sandbox dashboard") {
 		t.Fatalf("dashboard help missing: %q", stdout.String())
 	}
 }

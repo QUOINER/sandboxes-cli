@@ -8,16 +8,16 @@ import (
 	"fmt"
 	"io"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-const daemonUsage = `Usage: lsbx daemon COMMAND
+const daemonUsage = `Usage: rsbx daemon COMMAND
 
 Commands:
   status [--json]   show socket, version and sandbox counts
 
 start, stop, restart and log-level are not implemented: this build does not
-install or supervise a host service. Run klorqd/sandboxesd from your process
+install or supervise a host service. Run rheicd/sandboxesd from your process
 manager instead.
 `
 
@@ -33,10 +33,10 @@ func (r *Runner) daemon(args []string) int {
 	case "status":
 		return r.daemonStatus(args[1:])
 	case "start", "stop", "restart", "log-level":
-		_, _ = fmt.Fprintf(r.Err, "lsbx daemon %s: not implemented; this build does not install or supervise a host service\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "rsbx daemon %s: not implemented; this build does not install or supervise a host service\n", args[0])
 		return 1
 	default:
-		_, _ = fmt.Fprintf(r.Err, "lsbx daemon: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "rsbx daemon: unknown subcommand %q\n", args[0])
 		return 2
 	}
 }
@@ -64,7 +64,7 @@ func (r *Runner) daemonStatus(args []string) int {
 		return r.flagParseFailure("daemon status", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: lsbx daemon status [--json]")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx daemon status [--json]")
 		return 2
 	}
 	out := daemonStatusOutput{Socket: r.Socket, State: stateUnavailable}

@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const templateUsage = `Usage: lsbx template COMMAND
+const templateUsage = `Usage: rsbx template COMMAND
 
 Commands:
   ls [--format table|json|yaml]   list built-in agent template images
@@ -45,10 +45,10 @@ func (r *Runner) template(args []string) int {
 	case commandInspect:
 		return r.templateInspect(args[1:])
 	case "save", "load", "rm":
-		_, _ = fmt.Fprintf(r.Err, "lsbx template %s: unsupported: local template snapshots/import/removal are not implemented\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "rsbx template %s: unsupported: local template snapshots/import/removal are not implemented\n", args[0])
 		return 1
 	default:
-		_, _ = fmt.Fprintf(r.Err, "lsbx template: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "rsbx template: unknown subcommand %q\n", args[0])
 		return 2
 	}
 }
@@ -120,7 +120,7 @@ func (r *Runner) templateInspect(args []string) int {
 		return r.flagParseFailure("template inspect", err)
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprint(r.Err, "usage: lsbx template inspect NAME [--json]\n")
+		_, _ = fmt.Fprint(r.Err, "usage: rsbx template inspect NAME [--json]\n")
 		return 2
 	}
 	rows, err := templateRows()

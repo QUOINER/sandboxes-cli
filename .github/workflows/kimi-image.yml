@@ -24,10 +24,10 @@ jobs:
           context: agents/kimi
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/lickren/sandbox-kimi:0.43.0
+          tags: ghcr.io/rheic/sandbox-kimi:0.43.0
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ghcr.io/lickren/sandbox-kimi
+          subject-name: ghcr.io/rheic/sandbox-kimi
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
       - name: Verify published image provenance
@@ -35,6 +35,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh attestation verify
-          oci://ghcr.io/lickren/sandbox-kimi@${{ steps.push.outputs.digest }}
-          --repo lickren/sandboxes-cli
-          --signer-workflow lickren/sandboxes-cli/.github/workflows/kimi-image.yml
+          oci://ghcr.io/rheic/sandbox-kimi@${{ steps.push.outputs.digest }}
+          --repo rheic/sandboxes-cli
+          --signer-workflow rheic/sandboxes-cli/.github/workflows/kimi-image.yml

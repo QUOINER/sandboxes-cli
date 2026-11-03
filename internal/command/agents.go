@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/lickren/sandboxes-cli/internal/agent"
+	"github.com/rheic/sandboxes-cli/internal/agent"
 )
 
 var loadAgentRegistry = sync.OnceValues(agent.Load)

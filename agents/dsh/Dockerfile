@@ -8,10 +8,10 @@ ARG PNPM_VERSION=10.18.3
 RUN npm install --global "@deepseek-ai/dsh@${DSH_VERSION}" "pnpm@${PNPM_VERSION}" \
  && npm cache clean --force
 
-COPY entrypoint.sh /usr/local/bin/klorq-dsh-entrypoint
-RUN chmod 0755 /usr/local/bin/klorq-dsh-entrypoint
+COPY entrypoint.sh /usr/local/bin/rheic-dsh-entrypoint
+RUN chmod 0755 /usr/local/bin/rheic-dsh-entrypoint
 
 USER node
 WORKDIR /home/node
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/klorq-dsh-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/rheic-dsh-entrypoint"]
