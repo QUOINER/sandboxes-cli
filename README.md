@@ -63,8 +63,9 @@ lsbx kit inspect examples/kits/codex-go.yaml
 lsbx run --kit examples/kits/codex-go.yaml
 ```
 
-The dashboard shows the Lickren ember mark and sandbox status. The original
-scalable mark is in `assets/lickren-mark.svg`.
+The `lsbx tui` dashboard draws the Lickren ember mark directly in the terminal,
+with the organization name, brand colors, and sandbox status. The scalable SVG
+mark is in `assets/lickren-mark.svg`.
 
 `lsbx create` mirrors the Docker grammar `create AGENT [PATH...]` with optional
 `--name NAME`; a missing PATH creates a mountless sandbox, and PATHs accept the
