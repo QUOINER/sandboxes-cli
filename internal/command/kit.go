@@ -14,10 +14,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/quoiner/sandboxes-cli/internal/kit"
+	"github.com/lickren/sandboxes-cli/internal/kit"
 )
 
-const kitUsage = `Usage: qsbx kit COMMAND
+const kitUsage = `Usage: lsbx kit COMMAND
 
 Manage local kit files (klorq.dev/v1alpha1). Kits are unsigned local files;
 remote OCI kits, seeds, signatures and MCP allowlists are not implemented yet.
@@ -41,7 +41,7 @@ func (r *Runner) kit(args []string) int {
 	case "ls", "list":
 		return r.kitList(args[1:])
 	default:
-		_, _ = fmt.Fprintf(r.Err, "qsbx kit: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "lsbx kit: unknown subcommand %q\n", args[0])
 		return 2
 	}
 }
@@ -58,7 +58,7 @@ func (r *Runner) kitInspect(args []string) int {
 		return r.flagParseFailure("kit inspect", err)
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx kit inspect FILE [--format table|json|yaml]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx kit inspect FILE [--format table|json|yaml]")
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -102,7 +102,7 @@ func (r *Runner) kitInspect(args []string) int {
 
 func (r *Runner) kitList(args []string) int {
 	if len(args) > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx kit ls [DIR]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx kit ls [DIR]")
 		return 2
 	}
 	dir := "."

@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 type operationOutput struct {

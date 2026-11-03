@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Lickren</title>
+  <desc id="desc">An original ember and orbit mark in a vivid coral to violet gradient.</desc>
+  <defs>
+    <linearGradient id="ember" x1="38" y1="216" x2="220" y2="35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF6B35"/>
+      <stop offset=".48" stop-color="#F02D83"/>
+      <stop offset="1" stop-color="#8B35E8"/>
+    </linearGradient>
+    <linearGradient id="core" x1="91" y1="177" x2="162" y2="76" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFC15E"/>
+      <stop offset="1" stop-color="#FF477E"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 18c48 0 88 29 104 68 12 30 8 66-13 96-24 35-59 56-101 56-41 0-77-19-99-51-18-26-24-59-15-89C16 53 65 18 128 18Zm0 19C77 37 36 68 23 108c-9 27-2 55 13 77 19 27 49 43 82 43 35 0 65-17 85-47 17-25 21-53 11-78-14-34-49-66-86-66Z" fill="url(#ember)" fill-rule="evenodd"/>
+  <path d="M77 166c29-7 42-28 43-62 1-20 10-39 34-55-7 25-2 40 15 54 18 15 25 31 21 49-5 25-26 43-57 43-22 0-42-10-56-29Z" fill="url(#ember)"/>
+  <path d="M113 164c16-9 21-21 21-39 0-13 6-24 17-34-3 17 2 26 12 35 9 8 12 17 9 27-4 14-17 23-33 23-11 0-20-4-26-12Z" fill="url(#core)"/>
+  <circle cx="128" cy="131" r="8" fill="#FFF3E8"/>
+</svg>

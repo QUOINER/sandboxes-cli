@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/quoiner/sandboxes-cli/internal/command"
+	"github.com/lickren/sandboxes-cli/internal/command"
 )
 
 func main() {

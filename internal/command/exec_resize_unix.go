@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 	"golang.org/x/term"
 )
 

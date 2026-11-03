@@ -11,12 +11,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 
-	"github.com/quoiner/sandboxes-cli/internal/version"
+	"github.com/lickren/sandboxes-cli/internal/version"
 )
 
-const versionUsage = `usage: qsbx version [--format text|json|yaml] [--json]
+const versionUsage = `usage: lsbx version [--format text|json|yaml] [--json]
 
 Print the client version and, when the daemon is reachable, the server
 version and API contract version.`
@@ -90,9 +90,9 @@ func (r *Runner) version(ctx context.Context, args []string) int {
 	}
 
 	if report.Client.Revision != "" {
-		_, _ = fmt.Fprintf(r.Out, "qsbx version %s %s\n", report.Client.Version, report.Client.Revision)
+		_, _ = fmt.Fprintf(r.Out, "lsbx version %s %s\n", report.Client.Version, report.Client.Revision)
 	} else {
-		_, _ = fmt.Fprintf(r.Out, "qsbx version %s\n", report.Client.Version)
+		_, _ = fmt.Fprintf(r.Out, "lsbx version %s\n", report.Client.Version)
 	}
 	if report.Server.State == "running" {
 		_, _ = fmt.Fprintf(r.Out, "server %s (api %s)\n", report.Server.Version, report.Server.APIVersion)

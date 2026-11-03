@@ -14,7 +14,7 @@ func TestCompletionScripts(t *testing.T) {
 		if code := runner.Run(context.Background(), []string{"completion", shell}); code != 0 {
 			t.Fatalf("%s exit=%d output=%q", shell, code, out.String())
 		}
-		if !strings.Contains(out.String(), "qsbx") || !strings.Contains(out.String(), "create") {
+		if !strings.Contains(out.String(), "lsbx") || !strings.Contains(out.String(), "create") {
 			t.Fatalf("%s output=%q", shell, out.String())
 		}
 	}

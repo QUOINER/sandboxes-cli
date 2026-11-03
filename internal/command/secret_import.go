@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 var serviceEnvVars = map[string][]string{
@@ -38,7 +38,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		return code
 	}
 	if fs.NArg() > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx secret import [SERVICE] [--all] [--force] [--dry-run]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx secret import [SERVICE] [--all] [--force] [--dry-run]")
 		return 2
 	}
 	requested := ""

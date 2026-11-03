@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
-const cpUsage = `usage: qsbx cp SRC DST
+const cpUsage = `usage: lsbx cp SRC DST
 
 Copy one file or directory between the host and a sandbox. Exactly one side
 must be SANDBOX:PATH with an absolute guest path. The destination is the exact

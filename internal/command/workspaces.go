@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 func parseWorkspaceSpec(value string) (sdk.Workspace, error) {

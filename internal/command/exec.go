@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 type execOptions struct {
@@ -54,7 +54,7 @@ func (r *Runner) exec(ctx context.Context, args []string) int {
 		return r.flagParseFailure("exec", err)
 	}
 	if fs.NArg() < 2 {
-		_, _ = fmt.Fprintln(r.Err, "usage: qsbx exec [-i] [-t] [-w DIR] [-e KEY=VALUE] [--env-file FILE] [-u uid[:gid]] SANDBOX COMMAND [ARG...]")
+		_, _ = fmt.Fprintln(r.Err, "usage: lsbx exec [-i] [-t] [-w DIR] [-e KEY=VALUE] [--env-file FILE] [-u uid[:gid]] SANDBOX COMMAND [ARG...]")
 		return 125
 	}
 	env, err := buildExecEnv(envFlags, envFiles)

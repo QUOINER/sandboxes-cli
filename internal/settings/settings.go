@@ -156,7 +156,7 @@ func Save(path string, values Values) error {
 		entries = append(entries, "docker_volume_size = "+strconv.Quote(values.DockerVolumeSize))
 	}
 	sort.Strings(entries)
-	body := "# Klorq host settings. Managed by qsbx settings; do not put secrets here.\n"
+	body := "# Klorq host settings. Managed by lsbx settings; do not put secrets here.\n"
 	if len(entries) > 0 {
 		body += strings.Join(entries, "\n") + "\n"
 	}

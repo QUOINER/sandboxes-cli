@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/quoiner/sandboxes-go-sdk"
+	sdk "github.com/lickren/sandboxes-go-sdk"
 )
 
 type recordingExecClient struct {
