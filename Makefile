@@ -1,14 +1,14 @@
-BIN ?= bin/lsbx
+BIN ?= bin/rsbx
 COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
 
 .PHONY: build dev-bundle test check fmt lint vuln clean
 
 build:
-	go build -ldflags "-X github.com/lickren/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o $(BIN) ./cmd/lsbx
+	go build -ldflags "-X github.com/rheic/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o $(BIN) ./cmd/rsbx
 
 # Local workspace bundle; releases must use tagged module dependencies.
 dev-bundle:
-	go build -ldflags "-X github.com/lickren/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o dist/lsbx ./cmd/lsbx
+	go build -ldflags "-X github.com/rheic/sandboxes-cli/internal/version.Commit=$(COMMIT)" -o dist/rsbx ./cmd/rsbx
 	cd ../sandboxes-daemon && go build -o ../sandboxes-cli/dist/sandboxesd ./cmd/sandboxesd
 
 test:

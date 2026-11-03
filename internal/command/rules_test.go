@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 func TestParseNetworkRule(t *testing.T) {

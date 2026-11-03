@@ -15,13 +15,13 @@ import (
 // SeedCacheRoot returns the host cache for kit workspace seeds.
 func SeedCacheRoot() string {
 	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
-		return filepath.Join(dir, "lickren", "kits")
+		return filepath.Join(dir, "rheic", "kits")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".cache", "lickren", "kits")
+	return filepath.Join(home, ".cache", "rheic", "kits")
 }
 
 // ResolveSeed clones seed once into a deterministic host cache and returns the

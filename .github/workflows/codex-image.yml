@@ -29,15 +29,15 @@ jobs:
             --change 'WORKDIR /home/agent/workspace' --change 'USER agent' \
             --change 'LABEL com.docker.sandboxes.start-docker=true' \
             --change 'ENTRYPOINT ["tini","--"]' --change 'CMD ["codex"]' \
-            rootfs.tar ghcr.io/lickren/sandbox-codex:0.1
-          docker push ghcr.io/lickren/sandbox-codex:0.1
-          docker buildx imagetools inspect --raw ghcr.io/lickren/sandbox-codex:0.1 \
-            > "$RUNNER_TEMP/lickren-codex-manifest.json"
-          digest="sha256:$(sha256sum "$RUNNER_TEMP/lickren-codex-manifest.json" | cut -d ' ' -f 1)"
+            rootfs.tar ghcr.io/rheic/sandbox-codex:0.1
+          docker push ghcr.io/rheic/sandbox-codex:0.1
+          docker buildx imagetools inspect --raw ghcr.io/rheic/sandbox-codex:0.1 \
+            > "$RUNNER_TEMP/rheic-codex-manifest.json"
+          digest="sha256:$(sha256sum "$RUNNER_TEMP/rheic-codex-manifest.json" | cut -d ' ' -f 1)"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ghcr.io/lickren/sandbox-codex
+          subject-name: ghcr.io/rheic/sandbox-codex
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
       - name: Verify published image provenance
@@ -45,6 +45,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh attestation verify
-          oci://ghcr.io/lickren/sandbox-codex@${{ steps.publish.outputs.digest }}
-          --repo lickren/sandboxes-cli
-          --signer-workflow lickren/sandboxes-cli/.github/workflows/codex-image.yml
+          oci://ghcr.io/rheic/sandbox-codex@${{ steps.publish.outputs.digest }}
+          --repo rheic/sandboxes-cli
+          --signer-workflow rheic/sandboxes-cli/.github/workflows/codex-image.yml

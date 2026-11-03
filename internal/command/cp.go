@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-const cpUsage = `usage: lsbx cp SRC DST
+const cpUsage = `usage: rsbx cp SRC DST
 
 Copy one file or directory between the host and a sandbox. Exactly one side
 must be SANDBOX:PATH with an absolute guest path. The destination is the exact
@@ -141,7 +141,7 @@ func copyHostToGuest(ctx context.Context, client sdk.Client, sandboxID, hostSour
 	defer cancel()
 	session, err := sdk.Sessions(client).OpenSession(ctx, sdk.SessionRequest{
 		SandboxID: sandboxID,
-		Argv:      []string{shellPath, "-c", `mkdir -p "$1" && exec tar -xf - -C "$1"`, "lickren-cp", parent},
+		Argv:      []string{shellPath, "-c", `mkdir -p "$1" && exec tar -xf - -C "$1"`, "rheic-cp", parent},
 	})
 	if err != nil {
 		return err
@@ -334,7 +334,7 @@ func guestDirectoryExists(ctx context.Context, client sdk.Client, sandboxID, gue
 	var stderr bytes.Buffer
 	code, err := sdk.ExecService(client).Exec(ctx, sdk.ExecRequest{
 		SandboxID: sandboxID,
-		Argv:      []string{shellPath, "-c", `test -d "$1"`, "lickren-cp", guestPath},
+		Argv:      []string{shellPath, "-c", `test -d "$1"`, "rheic-cp", guestPath},
 		Stdout:    io.Discard,
 		Stderr:    &stderr,
 	})

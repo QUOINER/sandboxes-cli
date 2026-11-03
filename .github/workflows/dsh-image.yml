@@ -29,10 +29,10 @@ jobs:
           context: agents/dsh
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/lickren/sandbox-dsh-preview:0.2.1-rc.5
+          tags: ghcr.io/rheic/sandbox-dsh-preview:0.2.1-rc.5
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ghcr.io/lickren/sandbox-dsh-preview
+          subject-name: ghcr.io/rheic/sandbox-dsh-preview
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
       - name: Verify published image provenance
@@ -40,6 +40,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh attestation verify
-          oci://ghcr.io/lickren/sandbox-dsh-preview@${{ steps.push.outputs.digest }}
-          --repo lickren/sandboxes-cli
-          --signer-workflow lickren/sandboxes-cli/.github/workflows/dsh-image.yml
+          oci://ghcr.io/rheic/sandbox-dsh-preview@${{ steps.push.outputs.digest }}
+          --repo rheic/sandboxes-cli
+          --signer-workflow rheic/sandboxes-cli/.github/workflows/dsh-image.yml

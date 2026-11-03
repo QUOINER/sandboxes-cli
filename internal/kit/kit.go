@@ -1,4 +1,4 @@
-// Package kit parses local Lickren kit files.
+// Package kit parses local Rheic kit files.
 package kit
 
 import (
@@ -79,7 +79,7 @@ func Decode(r io.Reader) (Kit, error) {
 
 // Validate checks the stable local subset.
 func (k Kit) Validate() error {
-	if k.APIVersion != "lickren.dev/v1alpha1" {
+	if k.APIVersion != "rheic.dev/v1alpha1" {
 		return fmt.Errorf("unsupported kit apiVersion %q", k.APIVersion)
 	}
 	if k.Kind != "Kit" {

@@ -3,7 +3,7 @@ package command
 import (
 	"fmt"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 const (

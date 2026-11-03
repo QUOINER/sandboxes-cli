@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v3"
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
-const tuiUsage = `usage: lsbx tui [--refresh DURATION]
+const tuiUsage = `usage: rsbx tui [--refresh DURATION]
 
-Open the LICKREN sandbox dashboard.
+Open the RHEIC sandbox dashboard.
 
 Keys:
   ↑/↓ or j/k  select a sandbox
@@ -71,7 +71,7 @@ func (r *Runner) tui(ctx context.Context, args []string) int {
 		return r.flagParseFailure("tui", parseErr.err)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "lsbx tui: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "rsbx tui: %v\n", err)
 		return 2
 	}
 	client, err := r.client()
@@ -83,11 +83,11 @@ func (r *Runner) tui(ctx context.Context, args []string) int {
 
 	screen, err := tcell.NewScreen()
 	if err != nil {
-		_, _ = fmt.Fprintf(r.Err, "lsbx tui: terminal unavailable: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "rsbx tui: terminal unavailable: %v\n", err)
 		return 1
 	}
 	if err := screen.Init(); err != nil {
-		_, _ = fmt.Fprintf(r.Err, "lsbx tui: terminal initialization failed: %v\n", err)
+		_, _ = fmt.Fprintf(r.Err, "rsbx tui: terminal initialization failed: %v\n", err)
 		return 1
 	}
 	return runDashboard(ctx, screen, client, refreshEvery)
@@ -114,7 +114,7 @@ func parseTUIOptions(args []string) (time.Duration, bool, error) {
 
 func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client, refreshEvery time.Duration) int {
 	defer screen.Fini()
-	screen.SetTitle("LICKREN | Sandboxes")
+	screen.SetTitle("RHEIC | Sandboxes")
 	model := dashboardModel{}
 	refreshDashboard(ctx, client, &model)
 	drawDashboard(screen, model)
@@ -238,7 +238,7 @@ func drawDashboard(screen dashboardScreen, model dashboardModel) {
 	screen.SetStyle(background)
 	screen.Clear()
 	if width < dashboardMinWidth || height < dashboardMinHeight {
-		drawText(screen, 2, 1, "LICKREN", accent, width-4)
+		drawText(screen, 2, 1, "RHEIC", accent, width-4)
 		drawText(screen, 2, 3, "Resize terminal to at least 64 x 16", muted, width-4)
 		screen.Show()
 		return
@@ -281,7 +281,7 @@ func drawDashboard(screen dashboardScreen, model dashboardModel) {
 			drawDashboardDetails(screen, &model.items[model.selected], detailX, width, height, primary, accent, muted, warm)
 		} else if model.err == "" {
 			drawText(screen, detailX, 10, "No sandboxes yet", primary, width-detailX-2)
-			drawText(screen, detailX, 12, "Start one with lsbx run", muted, width-detailX-2)
+			drawText(screen, detailX, 12, "Start one with rsbx run", muted, width-detailX-2)
 		}
 	}
 	if model.err != "" {
@@ -313,7 +313,7 @@ func drawBrand(screen dashboardScreen, primary, accent tcell.Style, width int) {
 		}
 		drawText(screen, 3, y, row, style, 18)
 	}
-	drawText(screen, 24, 1, "LICKREN", primary.Bold(true), width-26)
+	drawText(screen, 24, 1, "RHEIC", primary.Bold(true), width-26)
 	drawText(screen, 24, 3, "LOCAL SANDBOXES  ·  EMBER", tcell.StyleDefault.Foreground(brandWarm).Background(brandBackground), width-26)
 }
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/lickren/sandboxes-go-sdk"
+	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
 type recordingExecClient struct {
@@ -93,13 +93,13 @@ func TestExpandExecFlagsKeepsValueFlagsAndFollowingFlags(t *testing.T) {
 }
 
 func TestExecCopiesExplicitHostEnvironment(t *testing.T) {
-	t.Setenv("LICKREN_HOST_COPY_TEST", "host-value")
+	t.Setenv("RHEIC_HOST_COPY_TEST", "host-value")
 	executor := &recordingExecutor{}
 	runner, out, stderr := runTestRunner(t, recordingExecClient{executor: executor}, "")
-	if code := runner.Run(context.Background(), []string{"exec", "-e", "LICKREN_HOST_COPY_TEST", "dev", "true"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"exec", "-e", "RHEIC_HOST_COPY_TEST", "dev", "true"}); code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
-	if len(executor.request.Env) != 1 || executor.request.Env[0] != "LICKREN_HOST_COPY_TEST=host-value" {
+	if len(executor.request.Env) != 1 || executor.request.Env[0] != "RHEIC_HOST_COPY_TEST=host-value" {
 		t.Fatalf("env=%q", executor.request.Env)
 	}
 }
@@ -107,7 +107,7 @@ func TestExecCopiesExplicitHostEnvironment(t *testing.T) {
 func TestExecSkipsUnsetBareHostEnvironment(t *testing.T) {
 	executor := &recordingExecutor{}
 	runner, out, stderr := runTestRunner(t, recordingExecClient{executor: executor}, "")
-	if code := runner.Run(context.Background(), []string{"exec", "-e", "LICKREN_DEFINITELY_UNSET_ENV", "dev", "true"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"exec", "-e", "RHEIC_DEFINITELY_UNSET_ENV", "dev", "true"}); code != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
 	if len(executor.request.Env) != 0 {

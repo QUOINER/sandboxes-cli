@@ -14,12 +14,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/lickren/sandboxes-cli/internal/settings"
+	"github.com/rheic/sandboxes-cli/internal/settings"
 )
 
-const settingsUsage = `Usage: lsbx settings COMMAND
+const settingsUsage = `Usage: rsbx settings COMMAND
 
-View and manage local Lickren settings in ~/.config/lickren/settings.toml.
+View and manage local Rheic settings in ~/.config/rheic/settings.toml.
 
 Commands:
   ls [--format table|json|yaml]   list settings and their effective source
@@ -62,14 +62,14 @@ func (r *Runner) settings(args []string) int {
 	case "unset":
 		return r.settingsUnset(args[1:])
 	default:
-		_, _ = fmt.Fprintf(r.Err, "lsbx settings: unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(r.Err, "rsbx settings: unknown subcommand %q\n", args[0])
 		_, _ = fmt.Fprint(r.Err, settingsUsage)
 		return 2
 	}
 }
 
 func (r *Runner) settingsPath() string {
-	if path := strings.TrimSpace(os.Getenv("LICKREN_SETTINGS_FILE")); path != "" {
+	if path := strings.TrimSpace(os.Getenv("RHEIC_SETTINGS_FILE")); path != "" {
 		return path
 	}
 	return settings.DefaultPath()
@@ -87,7 +87,7 @@ func (r *Runner) settingsList(args []string) int {
 		return r.flagParseFailure("settings ls", err)
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: lsbx settings ls [--format table|json|yaml]")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings ls [--format table|json|yaml]")
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -168,7 +168,7 @@ func uintString(value uint32) string {
 
 func (r *Runner) settingsGet(args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: lsbx settings get KEY")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings get KEY")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -187,7 +187,7 @@ func (r *Runner) settingsGet(args []string) int {
 
 func (r *Runner) settingsSet(args []string) int {
 	if len(args) != 2 {
-		_, _ = fmt.Fprintln(r.Err, "usage: lsbx settings set KEY VALUE")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings set KEY VALUE")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -205,14 +205,14 @@ func (r *Runner) settingsSet(args []string) int {
 	}
 	_, _ = fmt.Fprintf(r.Out, "set %s\n", args[0])
 	if restart := settingRestart(args[0]); restart {
-		_, _ = fmt.Fprintf(r.Out, "restart lickrend to apply %s\n", args[0])
+		_, _ = fmt.Fprintf(r.Out, "restart rheicd to apply %s\n", args[0])
 	}
 	return 0
 }
 
 func (r *Runner) settingsUnset(args []string) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: lsbx settings unset KEY")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings unset KEY")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
