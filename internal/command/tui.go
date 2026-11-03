@@ -314,7 +314,7 @@ func drawBrand(screen dashboardScreen, primary, accent tcell.Style, width int) {
 		drawText(screen, 3, y, row, style, 18)
 	}
 	drawText(screen, 24, 1, "LICKREN", primary.Bold(true), width-26)
-	drawText(screen, 24, 3, "EMBER  ·  SANDBOXES", tcell.StyleDefault.Foreground(brandWarm).Background(brandBackground), width-26)
+	drawText(screen, 24, 3, "LOCAL SANDBOXES  ·  EMBER", tcell.StyleDefault.Foreground(brandWarm).Background(brandBackground), width-26)
 }
 
 func drawDashboardDetails(screen dashboardScreen, item *sdk.Sandbox, x, width, height int, primary, accent, muted, warm tcell.Style) {
