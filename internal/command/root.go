@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/term"
 
-	sdk "github.com/KLORQ/sandboxes-go-sdk"
+	sdk "github.com/quoiner/sandboxes-go-sdk"
 
-	"github.com/KLORQ/sandboxes-cli/internal/kit"
+	"github.com/quoiner/sandboxes-cli/internal/kit"
 )
 
 const (
@@ -102,7 +102,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func (r *Runner) Run(ctx context.Context, args []string) int {
 	global := flag.NewFlagSet("qsbx", flag.ContinueOnError)
 	global.SetOutput(io.Discard)
-	socket := global.String("socket", r.Socket, "daemon unix socket")
+	socket := global.String("socket", r.Socket, "local daemon endpoint")
 	if err := global.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			r.usage()
@@ -214,6 +214,11 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "usage: ksbx login [--username USER --password-stdin]")
+		_, _ = fmt.Fprintln(fs.Output(), "Without flags, complete Docker device authorization in your browser.")
+		fs.PrintDefaults()
+	}
 	username := fs.String("username", "", "Docker Hub username for PAT login")
 	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
 	if err := fs.Parse(args); err != nil {
@@ -250,13 +255,40 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
 		return 0
 	}
-	_, _ = fmt.Fprintln(r.Err, "Opening Docker sign-in in your browser. Complete the authorization to finish login.")
-	if err := sdk.Accounts(client).Login(ctx, "docker"); err != nil {
+	if err := sdk.InteractiveAccounts(client).LoginInteractive(ctx, "docker", func(ctx context.Context, info sdk.DeviceLoginInfo) error {
+		return r.waitForDeviceLoginHandoff(ctx, info)
+	}); err != nil {
 		r.error(err)
 		return 1
 	}
 	_, _ = fmt.Fprintln(r.Out, "Logged in to Docker account")
 	return 0
+}
+
+func (r *Runner) waitForDeviceLoginHandoff(ctx context.Context, info sdk.DeviceLoginInfo) error {
+	if r.In == nil {
+		return errors.New("interactive login input is unavailable")
+	}
+	if _, err := fmt.Fprintf(r.Err, "Docker verification code: %s\nPress Enter to open %s, or Ctrl-C to cancel.\nIf the browser does not open, visit the URL above and enter the code.\n", info.UserCode, info.VerificationURI); err != nil {
+		return errors.New("write Docker device authorization details failed")
+	}
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := bufio.NewReader(r.In).ReadString('\n')
+		readDone <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-readDone:
+		if err != nil {
+			return errors.New("docker device login canceled before authorization handoff")
+		}
+		if _, err := fmt.Fprintln(r.Err, "Waiting for Docker authorization..."); err != nil {
+			return errors.New("write Docker authorization status failed")
+		}
+		return nil
+	}
 }
 
 func readDockerPassword(input io.Reader) ([]byte, error) {
@@ -1279,7 +1311,7 @@ func (r *Runner) printSandbox(sb *sdk.Sandbox) {
 func (r *Runner) usage() {
 	_, _ = fmt.Fprintln(r.Out, "usage: qsbx [--socket PATH] <command>")
 	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
-	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  daemon unix socket")
+	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  local daemon endpoint")
 	_, _ = fmt.Fprintln(r.Out, `Use "qsbx <command> --help" for command details.`)
 }
 

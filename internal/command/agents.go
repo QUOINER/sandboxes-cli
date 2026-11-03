@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/KLORQ/sandboxes-cli/internal/agent"
+	"github.com/quoiner/sandboxes-cli/internal/agent"
 )
 
 var loadAgentRegistry = sync.OnceValues(agent.Load)
