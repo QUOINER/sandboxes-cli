@@ -2,6 +2,10 @@
 
 Status: pre-alpha.
 
+## Import path migration
+
+The canonical Go module path is now `github.com/lickren/sandboxes-cli` (previously `github.com/quoiner/sandboxes-cli`). Update imports and `go.mod` requirements when moving to a release that includes this change. The old module path is not kept as a compatibility alias.
+
 Command-line and terminal client. Uses sandboxes-go-sdk; does not import daemon
 internals. The read-only dashboard uses `github.com/gdamore/tcell/v3` as its
 terminal runtime. Bubble Tea is not used. TUI remains a thin view/input layer;
