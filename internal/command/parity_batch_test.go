@@ -260,7 +260,7 @@ func (s versionFakeService) Get(context.Context) (sdk.VersionInfo, error) {
 
 // TestFileClosesOnEOF pins the non-terminal stdin model for PARITY P-11.
 func TestFileClosesOnEOF(t *testing.T) {
-	null, err := os.Open("/dev/null")
+	null, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatal(err)
 	}

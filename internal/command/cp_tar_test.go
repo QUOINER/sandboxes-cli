@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestWriteAndExtractCopyTarFile(t *testing.T) {
+	requireSafeCopyPath(t)
 	source := filepath.Join(t.TempDir(), "source.txt")
 	if err := os.WriteFile(source, []byte("payload"), 0o640); err != nil {
 		t.Fatal(err)
@@ -35,6 +37,7 @@ func TestWriteAndExtractCopyTarFile(t *testing.T) {
 }
 
 func TestWriteAndExtractCopyTarDirectory(t *testing.T) {
+	requireSafeCopyPath(t)
 	source := filepath.Join(t.TempDir(), "source")
 	if err := os.MkdirAll(filepath.Join(source, "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -62,6 +65,7 @@ func TestWriteAndExtractCopyTarDirectory(t *testing.T) {
 }
 
 func TestExtractCopyTarIntoExistingDirectory(t *testing.T) {
+	requireSafeCopyPath(t)
 	source := filepath.Join(t.TempDir(), "source")
 	if err := os.WriteFile(source, []byte("file"), 0o644); err != nil {
 		t.Fatal(err)
@@ -227,6 +231,7 @@ func TestCleanGuestPath(t *testing.T) {
 }
 
 func TestExtractCopyTarReplacesExistingTargetFile(t *testing.T) {
+	requireSafeCopyPath(t)
 	source := filepath.Join(t.TempDir(), "source")
 	if err := os.WriteFile(source, []byte("new"), 0o644); err != nil {
 		t.Fatal(err)
@@ -301,10 +306,20 @@ func TestExtractCopyTarSanitizesMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o755 || info.Mode()&(os.ModeSetuid|os.ModeSetgid) != 0 {
+	if info.Mode()&(os.ModeSetuid|os.ModeSetgid) != 0 {
+		t.Fatalf("mode=%v", info.Mode())
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o755 {
 		t.Fatalf("mode=%v", info.Mode())
 	}
 	if data, err := os.ReadFile(filepath.Join(dest, "file")); err != nil || string(data) != "data" {
 		t.Fatalf("data=%q err=%v", data, err)
+	}
+}
+
+func requireSafeCopyPath(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("safe copy source opening is unsupported on Windows and fails closed")
 	}
 }

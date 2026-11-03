@@ -33,6 +33,7 @@ func tarEntries(t *testing.T, data []byte) map[string]string {
 }
 
 func TestWriteCopyTarFollowNestedLinks(t *testing.T) {
+	requireSafeCopyPath(t)
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
 	source := filepath.Join(workspace, "src")
