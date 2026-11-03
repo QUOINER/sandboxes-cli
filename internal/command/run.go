@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	runUsage = `usage: qsbx run [flags] [AGENT] [PATH] [-- AGENT_ARGS...]
+	runUsage = `usage: qsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]
 
 Create a sandbox (or reuse one by --name), start it, and attach to an agent.
-The default workspace is the current directory. With --detach the sandbox is
-created and started, and its ID is printed without attaching.
+The default workspace is the current directory. Pass additional workspace paths
+after PATH; append :ro to make a workspace read-only. With --detach the sandbox
+is created and started, and its ID is printed without attaching.
 
 When no --name is given, the sandbox is named <agent>-<workspace-basename>.
 If that sandbox already exists it is reused: the CLI prompts on a terminal
@@ -40,26 +41,22 @@ Flags:
       --name NAME   sandbox name; reuse and restart it when it already exists
       --new         always create a new sandbox instead of reusing the named one
   -d, --detach      create and start without attaching
-      --image REF   image reference override for a new sandbox
-  -t, --template REF
-                    container image to use for a new sandbox (alias for --image)
-  -p, --publish HOST:GUEST[/tcp]
-                    publish a guest TCP port on host loopback (repeatable)
-      --allow-network CIDR[:PORT]
-                    allow egress CIDR rule (repeatable; optional udp: prefix)
-      --deny-network CIDR[:PORT]
-                    deny egress CIDR rule (repeatable; optional udp: prefix)
-      --policy-profile deny-all|balanced|sbx-compat
-                    opt-in egress profile (default deny-all)
-      --docker      run the dedicated Docker profile (privileged cgroup/network caps)
-      --cpus N      CPUs for a new sandbox (0 selects the daemon default)
-  -m, --memory SIZE memory limit for a new sandbox such as 512m or 2g
-  -e, --env KEY=VALUE
-                    environment override for the agent session (repeatable)
-      --env-file FILE
-                    read environment overrides from a file (repeatable)
-      --rm          remove the sandbox after the agent session exits
-  -h, --help        help for run
+      --image REF                 image reference override for a new sandbox
+  -t, --template REF              container image for a new sandbox (alias for --image)
+      --kit FILE                  apply a local kit definition
+      --deny-write PATH           mount PATH read-only (repeatable)
+  -p, --publish PORT_SPEC         publish a guest TCP/UDP port on host loopback
+                                  repeatable; accepts [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]
+      --allow-network CIDR[:PORT] allow egress CIDR rule (repeatable; optional udp: prefix)
+      --deny-network CIDR[:PORT]  deny egress CIDR rule (repeatable; optional udp: prefix)
+      --policy-profile PROFILE    deny-all, balanced, or opt-in sbx-compat
+      --docker                    run the dedicated Docker profile
+      --cpus N                    CPUs for a new sandbox (0 selects the daemon default)
+  -m, --memory SIZE               memory limit for a new sandbox, such as 512m or 2g
+  -e, --env KEY=VALUE             environment override for the agent session (repeatable)
+      --env-file FILE             read environment overrides from a file (repeatable)
+      --rm                        remove the sandbox after the agent session exits
+  -h, --help                      help for run
 `
 
 	shellAgent        = "shell"
