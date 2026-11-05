@@ -33,7 +33,7 @@ func TestCompletionScripts(t *testing.T) {
 }
 
 func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
-	for _, expected := range []string{"--oauth", "--token", "-t", "--force", "-f", "--all", "--all-sandboxes", "--sandbox", "--registry", "--global", "--quiet", "--service"} {
+	for _, expected := range []string{"--oauth", "--token", "-t", "--force", "-f", "--all", "--all-sandboxes", "--dry-run", "--sandbox", "--registry", "--global", "--quiet", "--service"} {
 		if !slices.Contains(completionTree[secretCommand], expected) {
 			t.Errorf("secret %s flag is missing from completion tree", expected)
 		}
