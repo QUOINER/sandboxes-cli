@@ -52,11 +52,15 @@ func TestSecretImportUsesAtomicCreateUnlessForceIsExplicit(t *testing.T) {
 	}
 
 	output.Reset()
+	runner.In = strings.NewReader("")
 	if code := runner.Run(context.Background(), []string{"secret", "import", "github", "-f"}); code != 0 {
 		t.Fatalf("force exit=%d output=%q", code, output.String())
 	}
 	if secrets.createCalls != 1 || secrets.setCalls != 1 || secrets.service != "github" {
 		t.Fatalf("-f did not use explicit overwrite path: create calls=%d set calls=%d secret=%+v", secrets.createCalls, secrets.setCalls, secrets)
+	}
+	if strings.Contains(output.String(), "Import github from GH_TOKEN") {
+		t.Fatalf("--force unexpectedly prompted: %q", output.String())
 	}
 }
 
@@ -106,4 +110,57 @@ func TestSecretImportStopsBeforeWritesWhenOpenAIStatusIsUnavailable(t *testing.T
 	if secrets.createCalls != 0 || secrets.service != "" {
 		t.Fatalf("write attempted after status failure: create calls=%d service=%q", secrets.createCalls, secrets.service)
 	}
+}
+
+func TestSecretImportOverwriteModesMatchDockerPromptRules(t *testing.T) {
+	t.Setenv("GH_TOKEN", "synthetic-token")
+	existing := []sdk.ServiceSecret{{Service: "github", Scope: sdk.SecretScopeGlobal}}
+
+	t.Run("interactive confirmation overwrites", func(t *testing.T) {
+		secrets := &fakeServiceSecrets{items: existing}
+		client := fakeClient{secrets: secrets}
+		var output bytes.Buffer
+		runner := &Runner{
+			Out: &output, Err: &output, In: strings.NewReader("y\n"),
+			NewClient: func(string) (sdk.Client, error) { return client, nil },
+		}
+		if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, output.String())
+		}
+		if secrets.setCalls != 1 || secrets.createCalls != 0 || !strings.Contains(output.String(), "Overwrite github from GH_TOKEN") {
+			t.Fatalf("interactive overwrite mismatch: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
+		}
+	})
+
+	t.Run("all skips existing entries", func(t *testing.T) {
+		secrets := &fakeServiceSecrets{items: existing}
+		client := fakeClient{secrets: secrets}
+		var output bytes.Buffer
+		runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+		if code := runner.Run(context.Background(), []string{"secret", "import", "github", "--all"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, output.String())
+		}
+		if secrets.setCalls != 0 || secrets.createCalls != 0 || !strings.Contains(output.String(), "already stored") {
+			t.Fatalf("--all did not skip existing entry: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
+		}
+	})
+
+	t.Run("negative confirmation leaves existing entry untouched", func(t *testing.T) {
+		secrets := &fakeServiceSecrets{items: existing}
+		client := fakeClient{secrets: secrets}
+		var output bytes.Buffer
+		runner := &Runner{
+			Out: &output, Err: &output, In: strings.NewReader("n\n"),
+			NewClient: func(string) (sdk.Client, error) { return client, nil },
+		}
+		if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, output.String())
+		}
+		if secrets.setCalls != 0 || secrets.createCalls != 0 || !strings.Contains(output.String(), "Overwrite github from GH_TOKEN") {
+			t.Fatalf("negative control modified or did not prompt for existing entry: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
+		}
+		if strings.Contains(output.String(), "no environment variable found") {
+			t.Fatalf("declined import was reported as a missing environment variable: %q", output.String())
+		}
+	})
 }

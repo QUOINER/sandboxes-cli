@@ -31,8 +31,15 @@ var serviceEnvVars = map[string][]string{
 func (r *Runner) secretImportHelp() int {
 	const usage = `Description:
   Import supported service secrets detected in host environment variables.
-  Existing global entries are skipped unless --force is explicit. Without --all,
-  each detected value requires interactive confirmation. --dry-run never writes.
+  Available services: anthropic, copilot, cursor, devin, droid, github, google,
+  groq, mistral, nebius, openai, openrouter, xai.
+
+  Existing global entries require confirmation before overwrite. Each detected
+  value shows a last-four-character preview and prompts unless --all or --force
+  is passed. --all imports new entries and skips existing ones; --force imports
+  without prompting and overwrites existing entries.
+  A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.
+  --dry-run never writes or displays secret values.
 
 Usage:
   rsbx secret import [SERVICE] [flags]
@@ -113,6 +120,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		}
 	}
 	imported := 0
+	detected := false
 	for _, service := range serviceSecretNames {
 		if requested != "" && service != requested {
 			continue
@@ -121,20 +129,28 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		if name == "" {
 			continue
 		}
+		detected = true
 		if service == openAIService && oauthPresent {
 			_, _ = fmt.Fprintf(r.Err, "skip %s: OAuth credentials are already stored and take precedence\n", service)
 			continue
 		}
-		if existing[service] && !*force {
-			_, _ = fmt.Fprintf(r.Err, "skip %s: already stored (use --force)\n", service)
-			continue
-		}
 		if *dryRun {
-			_, _ = fmt.Fprintf(r.Out, "would import %s from %s\n", service, name)
+			switch {
+			case existing[service] && *all && !*force:
+				_, _ = fmt.Fprintf(r.Out, "would skip %s from %s: already stored\n", service, name)
+			case existing[service]:
+				_, _ = fmt.Fprintf(r.Out, "would overwrite %s from %s\n", service, name)
+			default:
+				_, _ = fmt.Fprintf(r.Out, "would import %s from %s\n", service, name)
+			}
 			continue
 		}
-		if !*all {
-			ok, err := r.confirmSecretImport(service, name, value)
+		if existing[service] && *all && !*force {
+			_, _ = fmt.Fprintf(r.Err, "skip %s: already stored (use --force to replace it)\n", service)
+			continue
+		}
+		if !*all && !*force {
+			ok, err := r.confirmSecretImport(service, name, value, existing[service])
 			if err != nil {
 				r.error(err)
 				return 1
@@ -144,7 +160,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 			}
 		}
 		var err error
-		if *force {
+		if *force || existing[service] {
 			_, err = secretStore.Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
 		} else {
 			_, err = secretStore.Create(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
@@ -156,7 +172,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		imported++
 		_, _ = fmt.Fprintf(r.Out, "imported %s from %s\n", service, name)
 	}
-	if requested != "" && imported == 0 && !*dryRun {
+	if requested != "" && !detected && !*dryRun {
 		_, _ = fmt.Fprintf(r.Err, "no environment variable found for %s\n", requested)
 	}
 	return 0
@@ -171,12 +187,16 @@ func lookupServiceEnv(service string) (string, string) {
 	return "", ""
 }
 
-func (r *Runner) confirmSecretImport(service, name, value string) (bool, error) {
+func (r *Runner) confirmSecretImport(service, name, value string, overwrite bool) (bool, error) {
 	preview := "****"
 	if len(value) >= 4 {
 		preview = "****" + value[len(value)-4:]
 	}
-	if _, err := fmt.Fprintf(r.Err, "Import %s from %s (%s)? [y/N] ", service, name, preview); err != nil {
+	action := "Import"
+	if overwrite {
+		action = "Overwrite"
+	}
+	if _, err := fmt.Fprintf(r.Err, "%s %s from %s (%s)? [y/N] ", action, service, name, preview); err != nil {
 		return false, err
 	}
 	var answer string
