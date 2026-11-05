@@ -39,7 +39,7 @@ func (r *Runner) secretImportHelp() int {
   is passed. --all imports new entries and skips existing ones; --force imports
   without prompting and overwrites existing entries.
   A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.
-  --dry-run never writes or displays secret values.
+  --dry-run never writes and shows only a last-four-character preview.
 
 Usage:
   rsbx secret import [SERVICE] [flags]
@@ -137,11 +137,11 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		if *dryRun {
 			switch {
 			case existing[service] && *all && !*force:
-				_, _ = fmt.Fprintf(r.Out, "would skip %s from %s: already stored\n", service, name)
+				_, _ = fmt.Fprintf(r.Out, "Would skip %s from %s: already stored (last 4: %s)\n", service, name, lastFourPreview(value))
 			case existing[service]:
-				_, _ = fmt.Fprintf(r.Out, "would overwrite %s from %s\n", service, name)
+				_, _ = fmt.Fprintf(r.Out, "Would overwrite %s from %s (last 4: %s)\n", service, name, lastFourPreview(value))
 			default:
-				_, _ = fmt.Fprintf(r.Out, "would import %s from %s\n", service, name)
+				_, _ = fmt.Fprintf(r.Out, "Would import %s from %s (last 4: %s)\n", service, name, lastFourPreview(value))
 			}
 			continue
 		}
@@ -188,15 +188,11 @@ func lookupServiceEnv(service string) (string, string) {
 }
 
 func (r *Runner) confirmSecretImport(service, name, value string, overwrite bool) (bool, error) {
-	preview := "****"
-	if len(value) >= 4 {
-		preview = "****" + value[len(value)-4:]
-	}
 	action := "Import"
 	if overwrite {
 		action = "Overwrite"
 	}
-	if _, err := fmt.Fprintf(r.Err, "%s %s from %s (%s)? [y/N] ", action, service, name, preview); err != nil {
+	if _, err := fmt.Fprintf(r.Err, "%s %s from %s (last 4: %s)? [y/N] ", action, service, name, lastFourPreview(value)); err != nil {
 		return false, err
 	}
 	var answer string
@@ -208,4 +204,12 @@ func (r *Runner) confirmSecretImport(service, name, value string, overwrite bool
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == answerShortYes || answer == answerYes, nil
+}
+
+func lastFourPreview(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 4 {
+		return strings.Repeat("•", len(runes))
+	}
+	return string(runes[len(runes)-4:])
 }

@@ -164,3 +164,40 @@ func TestSecretImportOverwriteModesMatchDockerPromptRules(t *testing.T) {
 		}
 	})
 }
+
+func TestSecretImportDryRunShowsOnlyLastFourPreviewAndDoesNotWrite(t *testing.T) {
+	t.Setenv("GH_TOKEN", "synthetic-parity-token")
+	secrets := &fakeServiceSecrets{}
+	client := fakeClient{secrets: secrets}
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+
+	if code := runner.Run(context.Background(), []string{"secret", "import", "github", "--dry-run"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if !strings.Contains(output.String(), "Would import github from GH_TOKEN (last 4: oken)") {
+		t.Fatalf("missing Docker-style masked preview: %q", output.String())
+	}
+	if strings.Contains(output.String(), "synthetic-parity-token") || secrets.createCalls != 0 || secrets.setCalls != 0 {
+		t.Fatalf("dry-run leaked the full value or wrote a secret: output=%q create=%d set=%d", output.String(), secrets.createCalls, secrets.setCalls)
+	}
+}
+
+func TestLastFourPreviewMasksShortValues(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{value: "", want: ""},
+		{value: "x", want: "•"},
+		{value: "abc", want: "•••"},
+		{value: "abcd", want: "••••"},
+		{value: "abcde", want: "bcde"},
+		{value: "ключ-секрет", want: "крет"},
+	}
+	for _, test := range tests {
+		if got := lastFourPreview(test.value); got != test.want {
+			t.Errorf("lastFourPreview(%q)=%q, want %q", test.value, got, test.want)
+		}
+	}
+}
