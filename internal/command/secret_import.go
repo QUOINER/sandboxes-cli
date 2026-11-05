@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+	"golang.org/x/term"
 )
 
 var serviceEnvVars = map[string][]string{
@@ -35,9 +37,9 @@ func (r *Runner) secretImportHelp() int {
   groq, mistral, nebius, openai, openrouter, xai.
 
   Existing global entries require confirmation before overwrite. Each detected
-  value shows a last-four-character preview and prompts unless --all or --force
-  is passed. --all imports new entries and skips existing ones; --force imports
-  without prompting and overwrites existing entries.
+  value shows a last-four-character preview and prompts with a default of yes
+  unless --all or --force is passed. --all imports new entries and skips existing
+  ones; --force imports without prompting and overwrites existing entries.
   A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.
   --dry-run never writes and shows only a last-four-character preview.
 
@@ -120,7 +122,9 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		}
 	}
 	imported := 0
+	skipped := 0
 	detected := false
+	input := bufio.NewReader(r.In)
 	for _, service := range serviceSecretNames {
 		if requested != "" && service != requested {
 			continue
@@ -132,6 +136,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		detected = true
 		if service == openAIService && oauthPresent {
 			_, _ = fmt.Fprintf(r.Err, "skip %s: OAuth credentials are already stored and take precedence\n", service)
+			skipped++
 			continue
 		}
 		if *dryRun {
@@ -147,15 +152,17 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		}
 		if existing[service] && *all && !*force {
 			_, _ = fmt.Fprintf(r.Err, "skip %s: already stored (use --force to replace it)\n", service)
+			skipped++
 			continue
 		}
 		if !*all && !*force {
-			ok, err := r.confirmSecretImport(service, name, value, existing[service])
+			ok, err := r.confirmSecretImport(input, service, name, value, existing[service])
 			if err != nil {
 				r.error(err)
 				return 1
 			}
 			if !ok {
+				skipped++
 				continue
 			}
 		}
@@ -172,6 +179,9 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		imported++
 		_, _ = fmt.Fprintf(r.Out, "imported %s from %s\n", service, name)
 	}
+	if detected && !*dryRun {
+		_, _ = fmt.Fprintf(r.Out, "  %d secrets imported · %d skipped\n", imported, skipped)
+	}
 	if requested != "" && !detected && !*dryRun {
 		_, _ = fmt.Fprintf(r.Err, "no environment variable found for %s\n", requested)
 	}
@@ -187,23 +197,36 @@ func lookupServiceEnv(service string) (string, string) {
 	return "", ""
 }
 
-func (r *Runner) confirmSecretImport(service, name, value string, overwrite bool) (bool, error) {
+func (r *Runner) confirmSecretImport(input *bufio.Reader, service, name, value string, overwrite bool) (bool, error) {
 	action := "Import"
 	if overwrite {
 		action = "Overwrite"
 	}
-	if _, err := fmt.Fprintf(r.Err, "%s %s from %s (last 4: %s)? [y/N] ", action, service, name, lastFourPreview(value)); err != nil {
+	if _, err := fmt.Fprintf(r.Err, "%s %s from %s (last 4: %s) into the global keychain? (Y/n) ", action, service, name, lastFourPreview(value)); err != nil {
 		return false, err
 	}
-	var answer string
-	if _, err := fmt.Fscanln(r.In, &answer); err != nil && !errors.Is(err, os.ErrClosed) {
-		if strings.Contains(err.Error(), "EOF") {
-			return false, nil
+	line, err := input.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	if !isTerminalReader(input) {
+		if _, writeErr := fmt.Fprintln(r.Err); writeErr != nil {
+			return false, writeErr
 		}
-		return false, err
 	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
+	if errors.Is(err, io.EOF) && line == "" {
+		return false, nil
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer == "" {
+		return true, nil
+	}
 	return answer == answerShortYes || answer == answerYes, nil
+}
+
+func isTerminalReader(input io.Reader) bool {
+	file, ok := input.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
 }
 
 func lastFourPreview(value string) string {

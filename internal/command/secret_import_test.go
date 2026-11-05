@@ -159,10 +159,44 @@ func TestSecretImportOverwriteModesMatchDockerPromptRules(t *testing.T) {
 		if secrets.setCalls != 0 || secrets.createCalls != 0 || !strings.Contains(output.String(), "Overwrite github from GH_TOKEN") {
 			t.Fatalf("negative control modified or did not prompt for existing entry: set=%d create=%d output=%q", secrets.setCalls, secrets.createCalls, output.String())
 		}
+		if !strings.Contains(output.String(), "0 secrets imported · 1 skipped") {
+			t.Fatalf("missing imported/skipped summary: %q", output.String())
+		}
 		if strings.Contains(output.String(), "no environment variable found") {
 			t.Fatalf("declined import was reported as a missing environment variable: %q", output.String())
 		}
 	})
+}
+
+func TestSecretImportEmptyLineAcceptsDefaultYesButEOFCancels(t *testing.T) {
+	t.Setenv("GH_TOKEN", "synthetic-token")
+	for _, test := range []struct {
+		name       string
+		input      string
+		wantCreate int
+	}{
+		{name: "empty line accepts default yes", input: "\n", wantCreate: 1},
+		{name: "eof cancels", input: "", wantCreate: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			secrets := &fakeServiceSecrets{}
+			client := fakeClient{secrets: secrets}
+			var output bytes.Buffer
+			runner := &Runner{
+				Out: &output, Err: &output, In: strings.NewReader(test.input),
+				NewClient: func(string) (sdk.Client, error) { return client, nil },
+			}
+			if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, output.String())
+			}
+			if secrets.createCalls != test.wantCreate {
+				t.Fatalf("create calls=%d, want %d; output=%q", secrets.createCalls, test.wantCreate, output.String())
+			}
+			if !strings.Contains(output.String(), "(Y/n)") {
+				t.Fatalf("missing Docker default-yes prompt: %q", output.String())
+			}
+		})
+	}
 }
 
 func TestSecretImportDryRunShowsOnlyLastFourPreviewAndDoesNotWrite(t *testing.T) {
