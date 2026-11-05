@@ -70,6 +70,7 @@ func TestExecRejectsInvalidEnvAndUserBeforeConnecting(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"exec", "-e", "1BAD=x", "dev", "true"},
+		{"exec", "-e", "OPENAI_API_KEY=${secret:openai}", "dev", "true"},
 		{"exec", "-e", "OK=value", "-u", "root:", "dev", "true"},
 		{"exec", "--env-file", badFile, "dev", "true"},
 	} {

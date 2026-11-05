@@ -139,6 +139,9 @@ func validateExecEnvEntry(entry string) error {
 	if !validExecEnvKey(key) {
 		return errors.New("environment name must match [A-Za-z_][A-Za-z0-9_]*")
 	}
+	if strings.Contains(entry, "${secret:") {
+		return errors.New("${secret:service} is disabled because guest processes can read environment values; use a supported host proxy route")
+	}
 	return nil
 }
 
@@ -206,20 +209,6 @@ func envMap(entries []string) map[string]string {
 		if ok {
 			out[key] = value
 		}
-	}
-	return out
-}
-
-// withoutInjectedSecrets removes direct host-vault references from persistent
-// sandbox env. Proxy references contain no secret and enable the per-VM
-// channel at create time; the daemon removes them before runtime configuration.
-func withoutInjectedSecrets(entries []string) []string {
-	out := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if strings.Contains(entry, "${secret:") {
-			continue
-		}
-		out = append(out, entry)
 	}
 	return out
 }

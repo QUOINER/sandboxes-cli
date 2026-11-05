@@ -303,6 +303,7 @@ func TestRunRejectsExtraWorkspacesAndInvalidFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"run", "--name", "", "shell", "."},
 		{"run", "-e", "1BAD=x", "shell", "."},
+		{"run", "-e", "OPENAI_API_KEY=${secret:openai}", "shell", "."},
 		{"run", "--rm", "--detach", "shell", "."},
 	} {
 		called := false
