@@ -132,7 +132,9 @@ func (f *fakeServiceSecrets) Create(ctx context.Context, service string, scope s
 			return sdk.ServiceSecret{}, &sdk.Error{Code: "already_exists", Message: "service secret already exists; pass --force to replace it"}
 		}
 	}
-	return f.Set(ctx, service, scope, name, value)
+	f.service, f.scope, f.name = service, scope, name
+	f.value = append(f.value[:0], value...)
+	return sdk.ServiceSecret{Service: service, Scope: scope, SandboxName: name}, nil
 }
 
 func (f *fakeServiceSecrets) List(context.Context) ([]sdk.ServiceSecret, error) {
