@@ -79,8 +79,8 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		return code
 	}
 	if fs.NArg() > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret import [SERVICE] [--all] [--force] [--dry-run]")
-		return 2
+		_, _ = fmt.Fprintf(r.Err, "error: accepts at most 1 arg(s), received %d\n  try: rsbx secret import --help\n", fs.NArg())
+		return 1
 	}
 	requested := ""
 	if fs.NArg() == 1 {

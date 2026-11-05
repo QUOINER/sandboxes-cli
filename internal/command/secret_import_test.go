@@ -283,6 +283,27 @@ func TestSecretImportUnknownServiceMatchesDockerDiagnostic(t *testing.T) {
 	}
 }
 
+func TestSecretImportRejectsExtraPositionalsLikeDocker(t *testing.T) {
+	var output bytes.Buffer
+	newClientCalled := false
+	runner := &Runner{
+		Out: &output, Err: &output,
+		NewClient: func(string) (sdk.Client, error) {
+			newClientCalled = true
+			return fakeClient{secrets: &fakeServiceSecrets{}}, nil
+		},
+	}
+	if code := runner.Run(context.Background(), []string{"secret", "import", "github", "extra"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if !strings.Contains(output.String(), "error: accepts at most 1 arg(s), received 2\n  try: rsbx secret import --help") {
+		t.Fatalf("missing Docker-compatible argument error: %q", output.String())
+	}
+	if newClientCalled {
+		t.Fatal("invalid argument count reached the daemon")
+	}
+}
+
 func TestLastFourPreviewMasksShortValues(t *testing.T) {
 	tests := []struct {
 		value string
