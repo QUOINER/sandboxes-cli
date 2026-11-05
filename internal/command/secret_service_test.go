@@ -16,6 +16,8 @@ type fakeServiceSecrets struct {
 	name        string
 	value       []byte
 	items       []sdk.ServiceSecret
+	listErr     error
+	createCalls int
 	createErr   error
 	removed     []sdk.ServiceSecret
 	removeErr   error
@@ -119,6 +121,7 @@ func (f *fakeServiceSecrets) Set(_ context.Context, service string, scope sdk.Se
 }
 
 func (f *fakeServiceSecrets) Create(ctx context.Context, service string, scope sdk.SecretScope, name string, value []byte) (sdk.ServiceSecret, error) {
+	f.createCalls++
 	if f.createErr != nil {
 		return sdk.ServiceSecret{}, f.createErr
 	}
@@ -131,7 +134,7 @@ func (f *fakeServiceSecrets) Create(ctx context.Context, service string, scope s
 }
 
 func (f *fakeServiceSecrets) List(context.Context) ([]sdk.ServiceSecret, error) {
-	return f.items, nil
+	return f.items, f.listErr
 }
 func (f *fakeServiceSecrets) Remove(_ context.Context, service string, scope sdk.SecretScope, name string) (bool, error) {
 	f.removeCalls++

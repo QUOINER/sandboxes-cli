@@ -38,7 +38,7 @@ func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
 			t.Errorf("secret %s flag is missing from completion tree", expected)
 		}
 	}
-	for _, expected := range []string{"ls", "list", "set", "rm", "remove", "delete", "unset"} {
+	for _, expected := range []string{"import", "ls", "list", "set", "set-custom", "rm", "remove", "delete", "unset"} {
 		if !slices.Contains(completionSubcommands[secretCommand], expected) {
 			t.Errorf("secret %s command is missing from completion tree", expected)
 		}

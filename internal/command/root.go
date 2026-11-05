@@ -38,6 +38,7 @@ const (
 	commandRemove     = "remove"
 	commandUnset      = "unset"
 	commandSet        = "set"
+	commandSetCustom  = "set-custom"
 	schemeHTTPS       = "https"
 	reasonDefaultDeny = "default deny"
 )
@@ -454,41 +455,65 @@ func (r *Runner) stopSandbox(ctx context.Context, client sdk.Client, sandbox *sd
 
 func (r *Runner) secret(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret <set|ls|list|rm|remove|delete|unset> [flags]")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret <import|set|ls|list|rm|remove|delete|unset> [flags]")
 		return 2
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprintln(r.Out, "usage: rsbx secret <set|ls|list|rm|remove|delete|unset> [flags]")
-		_, _ = fmt.Fprintln(r.Out, "commands: ls (alias: list), set, rm (aliases: remove, delete, unset; service secrets and registry credentials)")
-		return 0
+		return r.secretHelp()
 	case commandSet:
-		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
-			return r.secretSetHelp()
-		}
-		if hasFlag(args[1:], "--registry") {
-			return r.registrySet(ctx, args[1:])
-		}
-		return r.serviceSecretSet(ctx, args[1:])
+		return r.secretSetCommand(ctx, args[1:])
 	case "rm", commandRemove, commandDelete, commandUnset:
-		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
-			return r.secretRemoveHelp()
-		}
-		if hasFlag(args[1:], "--all") {
-			return r.serviceSecretRemoveAll(ctx, args[1:])
-		}
-		if hasFlag(args[1:], "--registry") {
-			return r.registryRemove(ctx, args[1:])
-		}
-		return r.serviceSecretRemove(ctx, args[1:])
+		return r.secretRemoveCommand(ctx, args[1:])
 	case "ls", commandList:
 		return r.serviceSecretList(ctx, args[1:])
-	case "import":
-		return r.serviceSecretImport(ctx, args[1:])
+	case "import", commandSetCustom:
+		return r.secretExtendedCommand(ctx, args)
 	default:
 		_, _ = fmt.Fprintln(r.Err, "unknown secret command")
 		return 2
 	}
+}
+
+func (r *Runner) secretHelp() int {
+	_, _ = fmt.Fprintln(r.Out, "usage: rsbx secret <import|set|ls|list|rm|remove|delete|unset> [flags]")
+	_, _ = fmt.Fprintln(r.Out, "commands: import, ls (alias: list), set, rm (aliases: remove, delete, unset; service secrets and registry credentials)")
+	_, _ = fmt.Fprintln(r.Out, "set-custom is not implemented; custom secret values are never stored or injected")
+	return 0
+}
+
+func (r *Runner) secretSetCommand(ctx context.Context, args []string) int {
+	if hasFlag(args, "--help") || hasFlag(args, "-h") {
+		return r.secretSetHelp()
+	}
+	if hasFlag(args, "--registry") {
+		return r.registrySet(ctx, args)
+	}
+	return r.serviceSecretSet(ctx, args)
+}
+
+func (r *Runner) secretRemoveCommand(ctx context.Context, args []string) int {
+	if hasFlag(args, "--help") || hasFlag(args, "-h") {
+		return r.secretRemoveHelp()
+	}
+	if hasFlag(args, "--all") {
+		return r.serviceSecretRemoveAll(ctx, args)
+	}
+	if hasFlag(args, "--registry") {
+		return r.registryRemove(ctx, args)
+	}
+	return r.serviceSecretRemove(ctx, args)
+}
+
+func (r *Runner) secretExtendedCommand(ctx context.Context, args []string) int {
+	if args[0] == commandSetCustom {
+		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: custom secret storage and proxy substitution are not implemented; no secret was stored")
+		return 1
+	}
+	if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
+		return r.secretImportHelp()
+	}
+	return r.serviceSecretImport(ctx, args[1:])
 }
 
 func (r *Runner) secretSetHelp() int {

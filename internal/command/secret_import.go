@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -27,8 +28,38 @@ var serviceEnvVars = map[string][]string{
 	"xai":         {"XAI_API_KEY"},
 }
 
+func (r *Runner) secretImportHelp() int {
+	const usage = `Description:
+  Import supported service secrets detected in host environment variables.
+  Existing global entries are skipped unless --force is explicit. Without --all,
+  each detected value requires interactive confirmation. --dry-run never writes.
+
+Usage:
+  rsbx secret import [SERVICE] [flags]
+
+Examples:
+  rsbx secret import
+  rsbx secret import github
+  rsbx secret import --all
+  rsbx secret import github --force
+  rsbx secret import --dry-run
+
+Flags:
+      --all       Import every detected variable without prompting
+      --dry-run   Show what would be imported without writing
+  -f, --force     Overwrite an existing stored entry
+  -h, --help      Show this help
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
 //nolint:gocognit,gocyclo,cyclop,funlen // interactive import intentionally handles each branch explicitly.
 func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, nil)
 	fs := flag.NewFlagSet("secret import", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	all := fs.Bool("all", false, "import every detected variable without prompting")
@@ -55,13 +86,17 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	secretStore := sdk.Secrets(client)
 	existing := make(map[string]bool)
 	if !*force {
-		if items, err := sdk.Secrets(client).List(ctx); err == nil {
-			for _, item := range items {
-				if item.Scope == sdk.SecretScopeGlobal {
-					existing[item.Service] = true
-				}
+		items, err := secretStore.List(ctx)
+		if err != nil {
+			r.error(fmt.Errorf("list stored secrets before import: %w", err))
+			return 1
+		}
+		for _, item := range items {
+			if item.Scope == sdk.SecretScopeGlobal {
+				existing[item.Service] = true
 			}
 		}
 	}
@@ -92,7 +127,13 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 				continue
 			}
 		}
-		if _, err := sdk.Secrets(client).Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value)); err != nil {
+		var err error
+		if *force {
+			_, err = secretStore.Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
+		} else {
+			_, err = secretStore.Create(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
+		}
+		if err != nil {
 			r.error(err)
 			return 1
 		}

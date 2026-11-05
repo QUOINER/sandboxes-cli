@@ -34,7 +34,7 @@ var completionTree = map[string][]string{
 
 var completionSubcommands = map[string][]string{
 	policyCommand:     {"ls", commandInspect, actionAllow, actionDeny, "rm", "check", networkKeyword},
-	secretCommand:     {"ls", commandList, commandSet, "rm", commandRemove, commandDelete, commandUnset},
+	secretCommand:     {"import", "ls", commandList, commandSet, commandSetCustom, "rm", commandRemove, commandDelete, commandUnset},
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 }
 

@@ -413,6 +413,27 @@ func TestSecretHelpAndAlias(t *testing.T) {
 	}
 }
 
+func TestSecretCustomFailsClosedAndImportHelpIsAvailable(t *testing.T) {
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output}
+	if code := runner.Run(context.Background(), []string{"secret", "set-custom", "--host", "api.example.invalid", "--value", "synthetic"}); code != 1 {
+		t.Fatalf("set-custom exit=%d output=%q", code, output.String())
+	}
+	if !strings.Contains(output.String(), "no secret was stored") {
+		t.Fatalf("set-custom did not explain fail-closed result: %q", output.String())
+	}
+
+	output.Reset()
+	if code := runner.Run(context.Background(), []string{"secret", "import", "--help"}); code != 0 {
+		t.Fatalf("import help exit=%d output=%q", code, output.String())
+	}
+	for _, expected := range []string{"Usage:", "--dry-run", "--force", "without prompting"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("import help lacks %q: %s", expected, output.String())
+		}
+	}
+}
+
 type fakeClient struct {
 	registry        *fakeRegistryCredentials
 	secrets         sdk.SecretService
