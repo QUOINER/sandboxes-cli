@@ -498,21 +498,23 @@ func TestAccountCommandsUseAccountService(t *testing.T) {
 		if strings.Contains(out.String(), "synthetic-token") {
 			t.Fatalf("account command consumed or printed registry input: %q", out.String())
 		}
-		out.Reset()
-		if code := runner.Run(context.Background(), []string{command, "--help"}); code != 0 {
-			t.Fatalf("%s --help exit=%d", command, code)
-		}
-		if command == "login" {
-			for _, expected := range []string{"Description:\n  Sign in to Docker", "Examples:", "--password-stdin", "--username string"} {
-				if !strings.Contains(out.String(), expected) {
-					t.Fatalf("login help omitted %q: %q", expected, out.String())
+		for _, helpFlag := range []string{"--help", "-h"} {
+			out.Reset()
+			if code := runner.Run(context.Background(), []string{command, helpFlag}); code != 0 {
+				t.Fatalf("%s %s exit=%d", command, helpFlag, code)
+			}
+			if command == "login" {
+				for _, expected := range []string{"Description:\n  Sign in to Docker", "Examples:", "--password-stdin", "--username string"} {
+					if !strings.Contains(out.String(), expected) {
+						t.Fatalf("login help omitted %q: %q", expected, out.String())
+					}
 				}
+				if strings.Contains(out.String(), "\n  -username") {
+					t.Fatalf("login help exposed Go's short single-dash spelling: %q", out.String())
+				}
+			} else if !strings.Contains(out.String(), "Stop running local sandboxes and sign out of Docker") || !strings.Contains(out.String(), "-f, --force") {
+				t.Fatalf("logout help omitted Docker-compatible description or force alias: %q", out.String())
 			}
-			if strings.Contains(out.String(), "\n  -username") {
-				t.Fatalf("login help exposed Go's short single-dash spelling: %q", out.String())
-			}
-		} else if !strings.Contains(out.String(), "Stop running local sandboxes and sign out of Docker") || !strings.Contains(out.String(), "-f, --force") {
-			t.Fatalf("logout help omitted Docker-compatible description or force alias: %q", out.String())
 		}
 	}
 }
