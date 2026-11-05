@@ -183,7 +183,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(r.Out, "  %d secrets imported · %d skipped\n", imported, skipped)
 	}
 	if requested != "" && !detected && !*dryRun {
-		_, _ = fmt.Fprintf(r.Err, "no environment variable found for %s\n", requested)
+		_, _ = fmt.Fprintf(r.Err, "No env var detected for %q on the host. Either the env var isn't set, or %q isn't a known credential service.\n", requested, requested)
 	}
 	return 0
 }

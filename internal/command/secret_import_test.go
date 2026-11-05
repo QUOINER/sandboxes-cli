@@ -217,6 +217,22 @@ func TestSecretImportDryRunShowsOnlyLastFourPreviewAndDoesNotWrite(t *testing.T)
 	}
 }
 
+func TestSecretImportReportsMissingEnvironmentVariableLikeDocker(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	client := fakeClient{secrets: &fakeServiceSecrets{}}
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+
+	if code := runner.Run(context.Background(), []string{"secret", "import", "github"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	want := `No env var detected for "github" on the host. Either the env var isn't set, or "github" isn't a known credential service.`
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("missing Docker-compatible empty-environment message: %q", output.String())
+	}
+}
+
 func TestLastFourPreviewMasksShortValues(t *testing.T) {
 	tests := []struct {
 		value string
