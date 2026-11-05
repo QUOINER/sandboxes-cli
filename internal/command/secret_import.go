@@ -100,6 +100,17 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 			}
 		}
 	}
+	oauthPresent := false
+	if requested == "" || requested == openAIService {
+		if _, value := lookupServiceEnv(openAIService); value != "" {
+			present, err := sdk.AccountStatus(client).Status(ctx, openAIService)
+			if err != nil {
+				r.error(fmt.Errorf("check %s OAuth credentials before import: %w", openAIService, err))
+				return 1
+			}
+			oauthPresent = present
+		}
+	}
 	imported := 0
 	for _, service := range serviceSecretNames {
 		if requested != "" && service != requested {
@@ -107,6 +118,10 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		}
 		name, value := lookupServiceEnv(service)
 		if name == "" {
+			continue
+		}
+		if service == openAIService && oauthPresent {
+			_, _ = fmt.Fprintf(r.Err, "skip %s: OAuth credentials are already stored and take precedence\n", service)
 			continue
 		}
 		if existing[service] && !*force {

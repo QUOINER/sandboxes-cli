@@ -59,3 +59,51 @@ func TestSecretImportUsesAtomicCreateUnlessForceIsExplicit(t *testing.T) {
 		t.Fatalf("--force did not use explicit overwrite path: create calls=%d secret=%+v", secrets.createCalls, secrets)
 	}
 }
+
+func TestSecretImportSkipsOpenAIAPIKeyWhenOAuthIsStored(t *testing.T) {
+	t.Setenv(openAIAPIKeyEnv, "synthetic-openai-key")
+	secrets := &fakeServiceSecrets{}
+	client := fakeClient{
+		secrets:         secrets,
+		accountStatuses: fakeAccountStatus{statuses: map[string]bool{openAIService: true}},
+	}
+	var output bytes.Buffer
+	runner := &Runner{
+		Out: &output, Err: &output, In: strings.NewReader("y\n"),
+		NewClient: func(string) (sdk.Client, error) { return client, nil },
+	}
+
+	if code := runner.Run(context.Background(), []string{"secret", "import", openAIService}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if !strings.Contains(output.String(), "OAuth credentials are already stored and take precedence") {
+		t.Fatalf("OAuth precedence was not reported: %q", output.String())
+	}
+	if secrets.createCalls != 0 || secrets.service != "" {
+		t.Fatalf("API key was imported despite OAuth presence: create calls=%d service=%q", secrets.createCalls, secrets.service)
+	}
+}
+
+func TestSecretImportStopsBeforeWritesWhenOpenAIStatusIsUnavailable(t *testing.T) {
+	t.Setenv(openAIAPIKeyEnv, "synthetic-openai-key")
+	secrets := &fakeServiceSecrets{}
+	client := fakeClient{
+		secrets:         secrets,
+		accountStatuses: fakeAccountStatus{err: errors.New("synthetic status failure")},
+	}
+	var output bytes.Buffer
+	runner := &Runner{
+		Out: &output, Err: &output, In: strings.NewReader("y\n"),
+		NewClient: func(string) (sdk.Client, error) { return client, nil },
+	}
+
+	if code := runner.Run(context.Background(), []string{"secret", "import", openAIService}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if !strings.Contains(output.String(), "check openai OAuth credentials before import") {
+		t.Fatalf("missing status error: %q", output.String())
+	}
+	if secrets.createCalls != 0 || secrets.service != "" {
+		t.Fatalf("write attempted after status failure: create calls=%d service=%q", secrets.createCalls, secrets.service)
+	}
+}
