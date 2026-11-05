@@ -424,6 +424,16 @@ func TestSecretCustomFailsClosedAndImportHelpIsAvailable(t *testing.T) {
 	}
 
 	output.Reset()
+	if code := runner.Run(context.Background(), []string{"secret", "set-custom", "--help"}); code != 0 {
+		t.Fatalf("set-custom help exit=%d output=%q", code, output.String())
+	}
+	for _, expected := range []string{"Status:", "Unsupported.", "--host", "will not store or inject"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("set-custom help lacks %q: %s", expected, output.String())
+		}
+	}
+
+	output.Reset()
 	if code := runner.Run(context.Background(), []string{"secret", "import", "--help"}); code != 0 {
 		t.Fatalf("import help exit=%d output=%q", code, output.String())
 	}

@@ -510,6 +510,9 @@ func (r *Runner) secretRemoveCommand(ctx context.Context, args []string) int {
 
 func (r *Runner) secretExtendedCommand(ctx context.Context, args []string) int {
 	if args[0] == commandSetCustom {
+		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
+			return r.secretCustomHelp()
+		}
 		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: custom secret storage and proxy substitution are not implemented; no secret was stored")
 		return 1
 	}
@@ -517,6 +520,29 @@ func (r *Runner) secretExtendedCommand(ctx context.Context, args []string) int {
 		return r.secretImportHelp()
 	}
 	return r.serviceSecretImport(ctx, args[1:])
+}
+
+func (r *Runner) secretCustomHelp() int {
+	const usage = `Description:
+  Docker sbx supports custom secrets by storing a placeholder in the sandbox and
+  replacing it in matching outbound request headers. Rheic does not implement
+  custom-secret storage or proxy substitution yet.
+
+Status:
+  Unsupported. This command will not store or inject a secret.
+
+Usage:
+  rsbx secret set-custom [flags]
+
+Docker sbx option families include --host, --env, --name, --placeholder,
+--header, --format, --value, --token, --ref, --command, --sandbox, and --refresh.
+Passing these options to Rheic currently fails closed.
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
 }
 
 func (r *Runner) secretSetHelp() int {
