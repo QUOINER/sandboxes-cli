@@ -237,7 +237,7 @@ func (r *Runner) serviceSecretRemove(ctx context.Context, args []string) int {
 	if fs.NArg() == 2 {
 		*sandboxName = fs.Arg(0)
 		service = strings.ToLower(fs.Arg(1))
-		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use rsbx secret rm %s --sandbox %s\n", service, *sandboxName)
+		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use rsbx secret rm %s --sandbox %s\n", sanitizeTerminalText(service), sanitizeTerminalText(*sandboxName))
 	} else if fs.NArg() == 1 {
 		service = strings.ToLower(fs.Arg(0))
 	}

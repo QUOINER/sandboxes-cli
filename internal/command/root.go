@@ -904,7 +904,7 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 	}
 	if fs.NArg() == 1 {
 		*sandboxName = fs.Arg(0)
-		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use --sandbox %s with --registry\n", *sandboxName)
+		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use --sandbox %s with --registry\n", sanitizeTerminalText(*sandboxName))
 	}
 	if *global {
 		_, _ = fmt.Fprintln(r.Err, "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry")

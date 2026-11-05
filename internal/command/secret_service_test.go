@@ -144,6 +144,20 @@ func TestNamedServiceRemovalChecksInventoryBeforeConfirmation(t *testing.T) {
 			t.Fatalf("output=%q removals=%d", out.String(), secrets.removeCalls)
 		}
 	})
+
+	t.Run("legacy scope warning sanitizes terminal controls", func(t *testing.T) {
+		var out bytes.Buffer
+		sandboxName := "sandbox\x1b[2J"
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{secrets: &fakeServiceSecrets{}}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", sandboxName, "github"}); code != 1 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if strings.Contains(out.String(), "\x1b") || !strings.Contains(out.String(), "--sandbox sandbox�[2J") {
+			t.Fatalf("legacy scope warning is not sanitized: %q", out.String())
+		}
+	})
 }
 
 func TestOpenAIRemovalFailsClosedWhenOAuthStatusIsUnavailable(t *testing.T) {
