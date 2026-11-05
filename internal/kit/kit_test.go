@@ -143,6 +143,17 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {ho
 	}
 }
 
+func TestDecodeRejectsEmptyOAuthTokenEndpoint(t *testing.T) {
+	_, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+kind: Kit
+metadata: {name: empty-token-endpoint}
+spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {}, passthrough: true}}]}
+`))
+	if err == nil || !strings.Contains(err.Error(), "valid tokenEndpoint") {
+		t.Fatalf("empty tokenEndpoint should be rejected like sbx: %v", err)
+	}
+}
+
 func TestDecodePreservesEmptyPassthroughOAuthMessages(t *testing.T) {
 	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
 kind: Kit
