@@ -31,6 +31,29 @@ func TestSecretImportFailsClosedWhenInventoryCannotBeRead(t *testing.T) {
 	}
 }
 
+func TestSecretImportUnknownFlagMatchesDockerDiagnostic(t *testing.T) {
+	var output bytes.Buffer
+	clientCalled := false
+	runner := &Runner{
+		Out: &output, Err: &output, In: strings.NewReader(""),
+		NewClient: func(string) (sdk.Client, error) {
+			clientCalled = true
+			return fakeClient{}, nil
+		},
+	}
+
+	if code := runner.Run(context.Background(), []string{"secret", "import", "--bad-option"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	want := "error: unknown flag: --bad-option\n  try: rsbx secret import --help\n"
+	if output.String() != want {
+		t.Fatalf("output=%q, want %q", output.String(), want)
+	}
+	if clientCalled {
+		t.Fatal("unknown flag contacted daemon")
+	}
+}
+
 func TestSecretImportUsesAtomicCreateUnlessForceIsExplicit(t *testing.T) {
 	t.Setenv("GH_TOKEN", "synthetic-token")
 	secrets := &fakeServiceSecrets{}

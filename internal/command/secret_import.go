@@ -70,7 +70,7 @@ Flags:
 func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 	args = reorderFlagArgs(args, nil)
 	fs := flag.NewFlagSet("secret import", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
 	all := fs.Bool("all", false, "import every detected variable without prompting")
 	force := fs.Bool("force", false, "overwrite existing secrets")
 	fs.BoolVar(force, "f", false, "overwrite existing secrets")
