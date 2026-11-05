@@ -58,6 +58,13 @@ spec: {agent: codex, credentials: [{service: openai, oauth: {}}]}
 `)); err != nil {
 		t.Fatalf("omitted Docker-optional resourceHosts rejected: %v", err)
 	}
+	if _, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+kind: Kit
+metadata: {name: openai-empty-optional-objects}
+spec: {agent: codex, credentials: [{service: openai, oauth: {tokenEndpoint: {}, sentinels: {}, credentialFile: {}, responseFields: {}}}]}
+`)); err != nil {
+		t.Fatalf("empty Docker-optional objects changed fixed-provider validation: %v", err)
+	}
 	custom := `apiVersion: rheic.dev/v1alpha1
 kind: Kit
 metadata: {name: invalid}
