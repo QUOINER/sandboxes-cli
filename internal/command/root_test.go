@@ -467,7 +467,11 @@ func TestSecretRemovalRequiresForceOutsideInteractiveTerminal(t *testing.T) {
 			clientCalled = true
 			return test.client, nil
 		}}
-		if code := runner.Run(context.Background(), test.args); code != 1 || !clientCalled || out.String() != "error: stdin is not a terminal; use --force to skip confirmation\n" {
+		want := "error: stdin is not a terminal; use --force to skip confirmation\n"
+		if len(test.args) > 2 && test.args[2] == openAIService {
+			want = "SCOPE      SERVICE   SECRET\n(global)   openai    \n" + want
+		}
+		if code := runner.Run(context.Background(), test.args); code != 1 || !clientCalled || out.String() != want {
 			t.Fatalf("%v: exit=%d client-called=%t output=%q", test.args, code, clientCalled, out.String())
 		}
 	}

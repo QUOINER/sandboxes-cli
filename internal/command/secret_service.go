@@ -278,7 +278,7 @@ func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, san
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	present, err := namedServiceCredentialPresent(ctx, client, service, scope, sandboxName, oauth)
+	present, servicePresent, err := namedServiceCredentialPresent(ctx, client, service, scope, sandboxName, oauth)
 	if err != nil {
 		r.error(err)
 		return 1
@@ -286,6 +286,12 @@ func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, san
 	if !present {
 		_, _ = fmt.Fprintf(r.Err, "error: no secret found for service %q in scope %q\n", service, serviceCredentialScopeLabel(scope, sandboxName))
 		return 1
+	}
+	if servicePresent {
+		if err := writeNamedServiceRemovalCandidate(r.Out, service, serviceCredentialScopeLabel(scope, sandboxName)); err != nil {
+			r.error(err)
+			return 1
+		}
 	}
 	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("%s credentials", service), force)
 	if code != 0 {
@@ -300,23 +306,35 @@ func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, san
 	return r.removeNamedServiceValue(ctx, client, service, scope, sandboxName)
 }
 
-func namedServiceCredentialPresent(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string, oauthOnly bool) (bool, error) {
-	present := false
+func namedServiceCredentialPresent(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string, oauthOnly bool) (bool, bool, error) {
+	servicePresent := false
 	var err error
 	if !oauthOnly {
-		present, err = serviceCredentialPresent(ctx, client, service, scope, sandboxName)
+		servicePresent, err = serviceCredentialPresent(ctx, client, service, scope, sandboxName)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
 	}
+	present := servicePresent
 	if oauthOnly || service == openAIService && scope == sdk.SecretScopeGlobal {
 		oauthPresent, statusErr := sdk.AccountStatus(client).Status(ctx, openAIService)
 		if statusErr != nil {
-			return false, fmt.Errorf("check %s OAuth credentials before removal: %w", openAIService, statusErr)
+			return false, false, fmt.Errorf("check %s OAuth credentials before removal: %w", openAIService, statusErr)
 		}
 		present = present || oauthPresent
 	}
-	return present, nil
+	return present, servicePresent, nil
+}
+
+func writeNamedServiceRemovalCandidate(out io.Writer, service, scope string) error {
+	writer := tabwriter.NewWriter(out, 0, 4, 3, ' ', 0)
+	if _, err := fmt.Fprintln(writer, "SCOPE\tSERVICE\tSECRET"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "%s\t%s\t\n", scope, service); err != nil {
+		return err
+	}
+	return writer.Flush()
 }
 
 func serviceCredentialScopeLabel(scope sdk.SecretScope, sandboxName string) string {
