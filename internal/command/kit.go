@@ -14,16 +14,19 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	sdk "github.com/rheic/sandboxes-go-sdk"
+
 	"github.com/rheic/sandboxes-cli/internal/kit"
 )
 
 const kitUsage = `Usage: rsbx kit COMMAND
 
-Manage local kit files (rheic.dev/v1alpha1). Kits are unsigned local files;
-remote OCI kits, seeds, signatures and MCP allowlists are not implemented yet.
+Manage local Rheic kits and the supported Docker Kits v2 sandbox subset. Kits
+are unsigned local inputs; remote OCI kits, mixins, signatures and MCP allowlists
+are not implemented yet.
 
 Commands:
-  inspect FILE [--format table|json|yaml]   validate and print a kit
+  inspect FILE_OR_DIR [--format table|json|yaml]   validate and print a kit
   ls [DIR]                                  list local .yaml kits
 `
 
@@ -51,14 +54,14 @@ func (r *Runner) kitInspect(args []string) int {
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(moveKitInspectFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("kit inspect", err)
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx kit inspect FILE [--format table|json|yaml]")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx kit inspect FILE_OR_DIR [--format table|json|yaml]")
 		return 2
 	}
 	selected, err := resolveOperationFormat(*format, *jsonOutput)
@@ -100,6 +103,30 @@ func (r *Runner) kitInspect(args []string) int {
 	}
 }
 
+func moveKitInspectFlags(args []string) []string {
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		if arg == "--format" || arg == "-format" {
+			if i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+		}
+	}
+	return append(flags, positionals...)
+}
+
 func (r *Runner) kitList(args []string) int {
 	if len(args) > 1 {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx kit ls [DIR]")
@@ -138,29 +165,21 @@ func (r *Runner) kitList(args []string) int {
 	return 0
 }
 
-//nolint:gocyclo,cyclop // kit merge validates each optional field explicitly.
-func applyKit(ctx context.Context, path string, agent, image, profile *string, paths *[]string) error {
+func applyKit(ctx context.Context, path string, agent, image, profile *string, paths, env *[]string, oauthCredentials *[]sdk.OAuthCredential) error {
 	doc, err := kit.Load(path)
 	if err != nil {
 		return err
 	}
-	if *agent != "" && doc.Spec.Agent != "" && *agent != doc.Spec.Agent {
-		return fmt.Errorf("kit agent %q conflicts with requested agent %q", doc.Spec.Agent, *agent)
-	}
-	if *agent == "" {
-		*agent = doc.Spec.Agent
-	}
-	if *image != "" && doc.Spec.Image != "" && *image != doc.Spec.Image {
-		return fmt.Errorf("kit image %q conflicts with requested image %q", doc.Spec.Image, *image)
-	}
-	if *image == "" {
-		*image = doc.Spec.Image
-	}
-	if *profile != "" && doc.Spec.PolicyProfile != "" && *profile != doc.Spec.PolicyProfile {
-		return fmt.Errorf("kit policy profile %q conflicts with requested profile %q", doc.Spec.PolicyProfile, *profile)
-	}
-	if *profile == "" {
-		*profile = doc.Spec.PolicyProfile
+	for _, value := range []struct {
+		label   string
+		target  *string
+		fromKit string
+	}{
+		{"agent", agent, doc.Spec.Agent}, {"image", image, doc.Spec.Image}, {"policy profile", profile, doc.Spec.PolicyProfile},
+	} {
+		if err := mergeKitValue(value.label, value.target, value.fromKit); err != nil {
+			return err
+		}
 	}
 	if seed := doc.Spec.Workspace.Seed; seed != "" {
 		resolved, err := kit.ResolveSeed(ctx, seed, kit.SeedCacheRoot())
@@ -170,5 +189,70 @@ func applyKit(ctx context.Context, path string, agent, image, profile *string, p
 		*paths = append([]string{resolved}, *paths...)
 	}
 	*paths = append(*paths, doc.Paths()...)
+	converted, err := convertOAuthCredentials(doc.Spec.Credentials)
+	if err != nil {
+		return err
+	}
+	*oauthCredentials = append(*oauthCredentials, converted...)
+	return mergeOAuthEnvironment(doc, env)
+}
+
+func mergeKitValue(label string, target *string, fromKit string) error {
+	if *target != "" && fromKit != "" && *target != fromKit {
+		return fmt.Errorf("kit %s %q conflicts with requested %q", label, fromKit, *target)
+	}
+	if *target == "" {
+		*target = fromKit
+	}
+	return nil
+}
+
+func convertOAuthCredentials(credentials []kit.Credential) ([]sdk.OAuthCredential, error) {
+	converted := make([]sdk.OAuthCredential, 0, len(credentials))
+	for _, credential := range credentials {
+		oauth := credential.OAuth
+		if oauth == nil {
+			continue
+		}
+		// OpenAI OAuth uses the daemon's separately configured provider adapter;
+		// this declaration cannot replace its issuer or endpoint policy.
+		if credential.Service == "openai" {
+			continue
+		}
+		structure := ""
+		if len(oauth.CredentialFile.Structure) > 0 {
+			encoded, err := json.Marshal(oauth.CredentialFile.Structure)
+			if err != nil {
+				return nil, fmt.Errorf("encode kit OAuth credential structure: %w", err)
+			}
+			structure = string(encoded)
+		}
+		fields := oauth.ResponseFields
+		converted = append(converted, sdk.OAuthCredential{Service: credential.Service,
+			TokenEndpoint:  sdk.OAuthTokenEndpoint{Host: oauth.TokenEndpoint.Host, Path: oauth.TokenEndpoint.Path},
+			ResourceHosts:  append([]string(nil), oauth.ResourceHosts...),
+			Sentinels:      sdk.OAuthSentinels{AccessToken: oauth.Sentinels.AccessToken, RefreshToken: oauth.Sentinels.RefreshToken},
+			CredentialFile: sdk.OAuthCredentialFile{Path: oauth.CredentialFile.Path, StructureJSON: structure, Template: oauth.CredentialFile.Template},
+			ResponseFields: sdk.OAuthResponseFields{AccessToken: fields.AccessToken, RefreshToken: fields.RefreshToken, ExpiresIn: fields.ExpiresIn, Scope: fields.Scope, IDToken: fields.IDToken},
+			Passthrough:    oauth.Passthrough, SkipIfEnv: append([]string(nil), oauth.SkipIfEnv...)})
+	}
+	return converted, nil
+}
+
+func mergeOAuthEnvironment(doc kit.Kit, env *[]string) error {
+	for _, credentialEnv := range doc.OAuthEnvironment() {
+		credentialKey, _, _ := strings.Cut(credentialEnv, "=")
+		baseURLKey := ""
+		if credentialKey == openAIAPIKeyEnv {
+			baseURLKey = "OPENAI_BASE_URL"
+		}
+		for _, existing := range *env {
+			key, _, _ := strings.Cut(existing, "=")
+			if key == credentialKey || (baseURLKey != "" && key == baseURLKey) {
+				return fmt.Errorf("kit OAuth credential conflicts with explicit %s", key)
+			}
+		}
+		*env = append(*env, credentialEnv)
+	}
 	return nil
 }

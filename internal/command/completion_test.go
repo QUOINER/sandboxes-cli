@@ -20,6 +20,15 @@ func TestCompletionScripts(t *testing.T) {
 	}
 }
 
+func TestSecretOAuthFlagIsInCompletionTree(t *testing.T) {
+	for _, flag := range completionTree[secretCommand] {
+		if flag == "--oauth" {
+			return
+		}
+	}
+	t.Fatal("secret --oauth flag is missing from completion tree")
+}
+
 func TestCompletionRejectsUnknownShell(t *testing.T) {
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out}

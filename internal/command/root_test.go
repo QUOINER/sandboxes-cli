@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -144,17 +145,122 @@ func TestLoginUsesStdinAndDoesNotPrintPassword(t *testing.T) {
 	}
 }
 
-func TestLogoutUsesSDK(t *testing.T) {
+func TestOpenAIOAuthSecretCommandsUseHostAccountService(t *testing.T) {
+	for _, args := range [][]string{{"secret", "set", "openai", "--oauth"}, {"secret", "rm", "openai", "--oauth", "--force"}} {
+		var out bytes.Buffer
+		accounts := &fakeAccounts{}
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("must-not-be-read\n"), Socket: "unused", NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{accounts: accounts}, nil
+		}}
+		if code := runner.Run(context.Background(), args); code != 0 {
+			t.Fatalf("%v: exit=%d output=%q", args, code, out.String())
+		}
+		if !strings.Contains(out.String(), "openai OAuth credentials") || strings.Contains(out.String(), "must-not-be-read") {
+			t.Fatalf("%v: unexpected output %q", args, out.String())
+		}
+	}
+}
+
+func TestOpenAIOAuthSecretCommandRejectsUnsupportedScopeBeforeConnecting(t *testing.T) {
 	var out bytes.Buffer
-	runner := &Runner{
-		Out: &out, Err: &out, Socket: "unused",
-		NewClient: func(string) (sdk.Client, error) { return fakeClient{registry: &fakeRegistryCredentials{}}, nil },
+	clientCalled := false
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+		clientCalled = true
+		return fakeClient{accounts: &fakeAccounts{}}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"secret", "set", "anthropic", "--oauth"}); code != 2 || clientCalled {
+		t.Fatalf("exit=%d client-called=%t output=%q", code, clientCalled, out.String())
 	}
-	if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "--all-sandboxes"}); code != 0 {
-		t.Fatalf("exit code %d, output %s", code, out.String())
+}
+
+func TestRegistrySecretRemovalUsesSDK(t *testing.T) {
+	tests := []struct {
+		args        []string
+		want        []sdk.RegistryCredentialScope
+		wantSandbox string
+	}{
+		{args: []string{"secret", "rm", "--registry", "ghcr.io", "--force"}, want: []sdk.RegistryCredentialScope{sdk.RegistryScopeHostOnly, sdk.RegistryScopeAllSandboxes}},
+		{args: []string{"secret", "rm", "--registry", "ghcr.io", "--all-sandboxes", "--force"}, want: []sdk.RegistryCredentialScope{sdk.RegistryScopeAllSandboxes}},
+		{args: []string{"secret", "rm", "--registry", "ghcr.io", "--sandbox", "dev", "-f"}, want: []sdk.RegistryCredentialScope{sdk.RegistryScopeSandbox}, wantSandbox: "dev"},
 	}
-	if !strings.Contains(out.String(), "ghcr.io") || strings.Contains(out.String(), "synthetic-token") {
-		t.Fatalf("unexpected logout output %q", out.String())
+	for _, test := range tests {
+		var out bytes.Buffer
+		registry := &fakeRegistryCredentials{}
+		runner := &Runner{
+			Out: &out, Err: &out, Socket: "unused",
+			NewClient: func(string) (sdk.Client, error) { return fakeClient{registry: registry}, nil },
+		}
+		if code := runner.Run(context.Background(), test.args); code != 0 {
+			t.Fatalf("%v: exit code %d, output %s", test.args, code, out.String())
+		}
+		if !strings.Contains(out.String(), "ghcr.io") || strings.Contains(out.String(), "synthetic-token") {
+			t.Fatalf("%v: unexpected logout output %q", test.args, out.String())
+		}
+		if len(registry.requests) != len(test.want) {
+			t.Fatalf("%v: requests=%#v want scopes=%#v", test.args, registry.requests, test.want)
+		}
+		for index, scope := range test.want {
+			if registry.requests[index].Scope != scope || registry.requests[index].SandboxName != test.wantSandbox {
+				t.Fatalf("%v: request scopes=%#v want=%#v", test.args, registry.requests, test.want)
+			}
+		}
+	}
+}
+
+func TestSecretRemovalAliasesDispatchToServiceAndRegistryRemoval(t *testing.T) {
+	for _, alias := range []string{"remove", "delete", "unset"} {
+		for _, args := range [][]string{{"secret", alias, "openai"}, {"secret", alias, "--registry", "ghcr.io"}} {
+			var out bytes.Buffer
+			runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+				return nil, errors.New("synthetic connection failure")
+			}}
+			args = append(args, "--force")
+			if code := runner.Run(context.Background(), args); code != 1 || !strings.Contains(out.String(), "synthetic connection failure") || strings.Contains(out.String(), "unknown secret command") {
+				t.Fatalf("%v: exit=%d output=%q", args, code, out.String())
+			}
+		}
+	}
+}
+
+func TestSecretRemovalHelpListsAliasesAndImplementedFlags(t *testing.T) {
+	for _, command := range []string{"rm", "remove", "delete", "unset"} {
+		var out bytes.Buffer
+		runner := &Runner{Out: &out, Err: &out}
+		if code := runner.Run(context.Background(), []string{"secret", command, "--help"}); code != 0 {
+			t.Fatalf("%s: exit=%d output=%q", command, code, out.String())
+		}
+		for _, expected := range []string{"Aliases:", "rm, remove, delete, unset", "--oauth", "--registry", "--all-sandboxes", "--sandbox", "--force"} {
+			if !strings.Contains(out.String(), expected) {
+				t.Errorf("%s: help lacks %q: %s", command, expected, out.String())
+			}
+		}
+	}
+}
+
+func TestSecretSetHelpDocumentsInteractiveServiceChoiceAndLimits(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out}
+	if code := runner.Run(context.Background(), []string{"secret", "set", "--help"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "--force", "--ref string      Secret reference (not implemented)", "--command string  Secret command (not implemented)"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("help lacks %q: %s", expected, out.String())
+		}
+	}
+}
+
+func TestSecretRemovalRequiresForceOutsideInteractiveTerminal(t *testing.T) {
+	for _, args := range [][]string{{"secret", "rm", "openai"}, {"secret", "rm", "--registry", "ghcr.io"}} {
+		var out bytes.Buffer
+		clientCalled := false
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("yes\n"), NewClient: func(string) (sdk.Client, error) {
+			clientCalled = true
+			return fakeClient{}, nil
+		}}
+		if code := runner.Run(context.Background(), args); code != 2 || clientCalled || !strings.Contains(out.String(), "--force") {
+			t.Fatalf("%v: exit=%d client-called=%t output=%q", args, code, clientCalled, out.String())
+		}
 	}
 }
 
@@ -268,10 +374,8 @@ func TestLogoutRequiresConfirmationOrForceInNonTTY(t *testing.T) {
 func TestSecretRequiresExplicitRegistry(t *testing.T) {
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("synthetic-token\n")}
-	for _, subcommand := range []string{"set", "rm"} {
-		if code := runner.Run(context.Background(), []string{"secret", subcommand}); code != 2 {
-			t.Fatalf("secret %s without registry: exit=%d", subcommand, code)
-		}
+	if code := runner.Run(context.Background(), []string{"secret", "set"}); code != 2 {
+		t.Fatalf("secret set without service or registry: exit=%d", code)
 	}
 }
 
@@ -289,13 +393,14 @@ func TestSecretHelpAndAlias(t *testing.T) {
 }
 
 type fakeClient struct {
-	registry    *fakeRegistryCredentials
-	secrets     sdk.SecretService
-	sandbox     sdk.SandboxService
-	operations  sdk.OperationService
-	accounts    sdk.AccountService
-	interactive sdk.InteractiveAccountService
-	dockerPAT   sdk.DockerPATAccountService
+	registry        *fakeRegistryCredentials
+	secrets         sdk.SecretService
+	sandbox         sdk.SandboxService
+	operations      sdk.OperationService
+	accounts        sdk.AccountService
+	interactive     sdk.InteractiveAccountService
+	dockerPAT       sdk.DockerPATAccountService
+	accountStatuses sdk.AccountStatusService
 }
 
 func (f fakeClient) DockerPATAccountService() sdk.DockerPATAccountService {
@@ -334,12 +439,24 @@ func (f fakeClient) RegistryCredentials() sdk.RegistryCredentialService {
 	}
 	return f.registry
 }
+func (f fakeClient) ListRegistryCredentials(context.Context) ([]sdk.RegistryCredentialSummary, error) {
+	if f.registry == nil {
+		return nil, nil
+	}
+	return f.registry.items, f.registry.listErr
+}
 func (f fakeClient) SecretService() sdk.SecretService { return f.secrets }
 func (f fakeClient) AccountService() sdk.AccountService {
 	if f.accounts == nil {
 		return nil
 	}
 	return f.accounts
+}
+func (f fakeClient) AccountStatusService() sdk.AccountStatusService {
+	if f.accountStatuses != nil {
+		return f.accountStatuses
+	}
+	return fakeAccountStatus{}
 }
 func (f fakeClient) InteractiveAccountService() sdk.InteractiveAccountService {
 	if f.interactive != nil {
@@ -369,19 +486,31 @@ func (f fakeInteractiveAccounts) LoginInteractive(ctx context.Context, provider 
 
 type fakeAccounts struct{}
 
+type fakeAccountStatus struct {
+	statuses map[string]bool
+	err      error
+}
+
+func (f fakeAccountStatus) Status(_ context.Context, provider string) (bool, error) {
+	return f.statuses[provider], f.err
+}
+
 func (fakeAccounts) Login(_ context.Context, provider string) error {
-	if provider != "docker" {
+	if provider != "docker" && provider != "openai" {
 		return io.ErrUnexpectedEOF
 	}
 	return nil
 }
 func (fakeAccounts) Logout(_ context.Context, provider string) (bool, error) {
-	return provider == "docker", nil
+	return provider == "docker" || provider == "openai", nil
 }
 
 type fakeRegistryCredentials struct {
 	request  sdk.RegistryLoginRequest
 	password string
+	requests []sdk.RegistryLogoutRequest
+	items    []sdk.RegistryCredentialSummary
+	listErr  error
 }
 
 func (f *fakeRegistryCredentials) Login(_ context.Context, req sdk.RegistryLoginRequest) (*sdk.RegistryLoginResponse, error) {
@@ -391,6 +520,7 @@ func (f *fakeRegistryCredentials) Login(_ context.Context, req sdk.RegistryLogin
 }
 
 func (f *fakeRegistryCredentials) Logout(_ context.Context, req sdk.RegistryLogoutRequest) (*sdk.RegistryLogoutResponse, error) {
+	f.requests = append(f.requests, req)
 	return &sdk.RegistryLogoutResponse{Removed: req.Registry == "ghcr.io"}, nil
 }
 

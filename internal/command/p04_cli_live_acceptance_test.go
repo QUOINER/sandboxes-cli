@@ -266,7 +266,7 @@ func TestP04CLIServiceSecretLifecycleAgainstOwnedDaemonAndVM(t *testing.T) {
 	if _, err := execWithProxyEnv(); err != nil {
 		t.Fatalf("CLI exec after runtime process-group recovery failed: %v", err)
 	}
-	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "secret", "rm", "openai", "--sandbox", name); err != nil {
+	if _, err := runP04CLI(ctx, cliPath, cliSocket, cliEnv, "secret", "rm", "openai", "--sandbox", name, "--force"); err != nil {
 		t.Fatalf("CLI service secret revoke failed: %v", err)
 	} else {
 		secretStored = false
@@ -517,7 +517,7 @@ func requestP04CLIBrokerToken(ctx context.Context, socket string) error {
 }
 
 func removeP04CLISecret(ctx context.Context, binary, socket string, env []string, sandboxName string) error {
-	_, err := runP04CLI(ctx, binary, socket, env, "secret", "rm", "openai", "--sandbox", sandboxName)
+	_, err := runP04CLI(ctx, binary, socket, env, "secret", "rm", "openai", "--sandbox", sandboxName, "--force")
 	if err == nil {
 		return nil
 	}

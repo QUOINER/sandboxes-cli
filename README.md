@@ -52,9 +52,11 @@ source /tmp/rsbx-completion.bash
 rsbx --socket "$HOME/.sandboxes/sandboxesd.sock" wait <operation-id>
 rsbx secret set --registry ghcr.io --username <registry-user>
 rsbx secret set openai --sandbox dev          # hidden prompt; value stays in host keychain
+rsbx secret set openai --oauth                # OpenAI account OAuth on the host
 rsbx secret import --all
 rsbx secret ls
 rsbx secret rm openai --sandbox dev
+rsbx secret rm openai --oauth
 rsbx settings ls
 rsbx settings set dns.upstream 1.1.1.1:53
 rsbx settings set policy.profile balanced
@@ -108,7 +110,11 @@ filesystem rules are not implemented. TCP and UDP are supported with explicit
 or ephemeral host ports; an occupied host port is rejected at create and
 dynamic updates reconcile gvproxy's forwarders without restarting the VM.
 Loopback IPv4/IPv6 bindings are supported; public bindings are rejected.
-Local kits (`--kit FILE`) can set agent, image, profile and mounts. A
+Local kits (`--kit FILE_OR_DIR`) can set agent, image, profile and mounts. A
+Docker Kits v2 directory is read from `spec.yaml` (or `spec.yml`). Its sandbox
+envelope and OAuth declaration fields are accepted for
+the implemented subset; unrecognized fields, mixins, remote references,
+signatures and unsupported runtime features still fail closed. A
 `workspace.seed` git URL is cloned once into the host cache with hooks disabled
 and mounted as the workspace; signatures and MCP allowlists still fail closed. Reusing a `--name` with an
 explicitly different workspace set/mode fails instead of silently ignoring the
@@ -180,12 +186,70 @@ token through stdin with `--password-stdin`; never pass it as an argument or
 environment variable. Credentials are stored in the host OS credential vault
 with host-only scope by default. `--all-sandboxes` and `--sandbox NAME` store
 separate scoped entries. `rsbx secret rm --registry` removes the selected entry.
+Without `--all-sandboxes` or `--sandbox NAME`, it removes both host-only and
+all-sandboxes entries for that registry. Registry removals prompt in a terminal;
+pass `--force`/`-f` for automation. `secret rm` also accepts `remove`, `delete`,
+and `unset`; `secret ls` accepts the `list` alias and Docker-style filters.
+`rsbx secret rm --all` removes all currently inventoried service secrets, registry
+credentials, and Docker/OpenAI account tokens across scopes after confirmation
+(or with `--force`). A failure during deletion can leave a partial result.
+Custom-secret storage is not implemented and is excluded; the command prints
+that limitation. Running `rsbx secret rm` without a name opens an interactive
+selector for currently inventoried service, registry, and Docker/OpenAI account
+credentials; Enter removes the highlighted item and `q` cancels.
+Like Docker `sbx`, `rsbx secret rm openai` removes both the global OpenAI API
+key and host OAuth session. Use `--oauth` to remove only OAuth; `--sandbox`
+removes only that sandbox's API key.
+
+Setting a service secret uses an atomic create-only RPC and refuses to replace
+an existing value. Pass `--force`/`-f` for an explicit overwrite. Older daemons
+that lack this RPC fail closed with `Unimplemented`.
+Omit the service name in an interactive terminal to choose from the supported
+providers; noninteractive callers must name the service explicitly.
 
 Registry credentials previously managed with `rsbx login --registry` and
 `rsbx logout --registry` are now managed with `rsbx secret set --registry`,
 `rsbx secret ls` and `rsbx secret rm --registry`; existing keychain entries do
 not need to be moved, but entries created before the index was introduced are
 not listed until they are re-saved.
+
+`rsbx secret set openai --oauth` starts the OpenAI/Codex PKCE flow on the host
+and stores access, refresh, and ID tokens in the host credential vault. The
+registered loopback callback uses `127.0.0.1:1455` with `1457` as a fallback.
+Use `rsbx secret rm openai --oauth` to remove the OAuth record and request
+best-effort upstream revocation. For clients that accept a bearer token through
+`OPENAI_API_KEY`, configure the explicit host broker reference when creating a
+sandbox: `rsbx run --env 'OPENAI_API_KEY=${oauth:openai}' ...`. The guest gets
+only a placeholder; the daemon refreshes and injects the host token on requests
+to `api.openai.com`. The built-in OpenAI OAuth route is supported. Generic kit OAuth declarations
+are represented in the API contract, but custom token-endpoint interception and
+credential-file setup are not enabled by this daemon yet.
+
+`rsbx run codex` uses host credentials before starting the agent. An explicit
+`OPENAI_API_KEY` or `OPENAI_BASE_URL` is left to the caller. Otherwise, the CLI
+checks secret metadata (never secret values) and uses a stored OpenAI API key
+through the service proxy when one applies to the selected sandbox. If no API
+key applies, it checks the host OAuth account, starts login when needed, and
+passes only the OAuth proxy reference into Codex. This selection is limited to
+the built-in Codex run path; `create` does not start an interactive login.
+
+A local kit can select the built-in OpenAI host OAuth flow:
+
+```yaml
+spec:
+  credentials:
+    - service: openai
+      oauth:
+        resourceHosts: [api.openai.com]
+```
+
+`rsbx run --kit FILE` checks host credential status and starts the host login
+flow if needed. The OpenAI issuer, token endpoint, and resource policy are fixed
+by the daemon; a kit cannot override them. Generic Docker v2 OAuth declarations
+are parsed and transported by CLI/API, but the daemon still rejects them until
+host TLS interception, resource routing, guest credential-file setup, and
+per-sandbox vault lifecycle are implemented.
+
 `rsbx login` and `rsbx logout` are reserved for Docker account authentication,
 using the same Docker public device-flow client as Docker CLI and Docker
 Sandboxes. Login starts device authorization at Docker, opens the browser,

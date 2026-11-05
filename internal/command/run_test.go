@@ -20,6 +20,23 @@ type runClient struct {
 	sessions  *fakeSessions
 }
 
+type runSecretService []sdk.ServiceSecret
+
+func (s runSecretService) Set(context.Context, string, sdk.SecretScope, string, []byte) (sdk.ServiceSecret, error) {
+	return sdk.ServiceSecret{}, nil
+}
+func (s runSecretService) Create(context.Context, string, sdk.SecretScope, string, []byte) (sdk.ServiceSecret, error) {
+	return sdk.ServiceSecret{}, nil
+}
+
+func (s runSecretService) List(context.Context) ([]sdk.ServiceSecret, error) {
+	return []sdk.ServiceSecret(s), nil
+}
+
+func (s runSecretService) Remove(context.Context, string, sdk.SecretScope, string) (bool, error) {
+	return false, nil
+}
+
 func (c runClient) Sandboxes() sdk.SandboxService    { return c.sandboxes }
 func (c runClient) PolicyService() sdk.PolicyService { return fakePolicyCheck{sandboxes: c.sandboxes} }
 func (c runClient) SessionExecutor() sdk.SessionExecutor {
@@ -145,6 +162,98 @@ func TestRunCreatesStartsAndAttachesShell(t *testing.T) {
 	}
 	if sessions.req.SandboxID != "sb-run" || !sessions.closed {
 		t.Fatalf("session id=%q closed=%t", sessions.req.SandboxID, sessions.closed)
+	}
+}
+
+func TestRunKitRequestsHostOpenAIOAuthAndAddsProxyReference(t *testing.T) {
+	kitPath := filepath.Join(t.TempDir(), "codex-oauth.yaml")
+	kitBody := `apiVersion: rheic.dev/v1alpha1
+kind: Kit
+metadata: {name: codex-oauth}
+spec:
+  agent: codex
+  credentials:
+    - service: openai
+      oauth:
+        resourceHosts: [api.openai.com]
+`
+	if err := os.WriteFile(kitPath, []byte(kitBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sandboxes := &runSandbox{}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{
+		fakeClient: fakeClient{accounts: &fakeAccounts{}}, sandboxes: sandboxes, sessions: sessions,
+	}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--kit", kitPath}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if sandboxes.createCalls != 1 || sandboxes.created.Env["OPENAI_API_KEY"] != "${oauth:openai}" {
+		t.Fatalf("create calls=%d env=%v", sandboxes.createCalls, sandboxes.created.Env)
+	}
+	if len(sandboxes.created.OAuthCredentials) != 0 {
+		t.Fatalf("fixed OpenAI provider config must stay daemon-managed: %#v", sandboxes.created.OAuthCredentials)
+	}
+	if !reflect.DeepEqual(sessions.req.Env, []string{"OPENAI_API_KEY=${oauth:openai}"}) {
+		t.Fatalf("agent env=%q", sessions.req.Env)
+	}
+}
+
+func TestRunCodexUsesHostOAuthWhenNoStoredAPIKey(t *testing.T) {
+	sandboxes := &runSandbox{}
+	runner, out, stderr := runTestRunner(t, runClient{
+		fakeClient: fakeClient{accounts: &fakeAccounts{}, secrets: runSecretService{}},
+		sandboxes:  sandboxes,
+		sessions:   &fakeSessions{},
+	}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--detach", "codex"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if got := sandboxes.created.Env["OPENAI_API_KEY"]; got != "${oauth:openai}" {
+		t.Fatalf("Codex env=%q, want host OAuth reference", got)
+	}
+}
+
+func TestRunCodexPrefersStoredAPIKey(t *testing.T) {
+	sandboxes := &runSandbox{}
+	runner, out, stderr := runTestRunner(t, runClient{
+		fakeClient: fakeClient{accounts: &fakeAccounts{}, secrets: runSecretService{{Service: "openai", Scope: sdk.SecretScopeGlobal}}},
+		sandboxes:  sandboxes,
+		sessions:   &fakeSessions{},
+	}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--detach", "codex"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if got := sandboxes.created.Env["OPENAI_API_KEY"]; got != "${proxy:openai}" {
+		t.Fatalf("Codex env=%q, want service-secret proxy reference", got)
+	}
+}
+
+func TestValidateOAuthProxyEnvironmentRejectsOverrides(t *testing.T) {
+	if err := validateOAuthProxyEnvironment([]string{openAIOAuthEnvRef, "PATH=/bin"}); err != nil {
+		t.Fatalf("valid OAuth proxy environment rejected: %v", err)
+	}
+	for _, env := range [][]string{
+		{openAIOAuthEnvRef, "OPENAI_API_KEY=explicit-key"},
+		{openAIOAuthEnvRef, "OPENAI_BASE_URL=https://attacker.invalid"},
+		{openAIOAuthEnvRef, openAIOAuthEnvRef},
+	} {
+		if err := validateOAuthProxyEnvironment(env); err == nil {
+			t.Errorf("accepted conflicting OAuth proxy environment %q", env)
+		}
+	}
+}
+
+func TestBuildExecEnvRejectsOAuthConflictsAcrossEnvFileAndFlags(t *testing.T) {
+	envFile := filepath.Join(t.TempDir(), "oauth.env")
+	if err := os.WriteFile(envFile, []byte(openAIOAuthEnvRef+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildExecEnv([]string{"OPENAI_API_KEY=explicit"}, []string{envFile}); err == nil {
+		t.Fatal("accepted explicit OpenAI key alongside OAuth kit reference")
+	}
+	if _, err := buildExecEnv([]string{"OPENAI_BASE_URL=https://attacker.invalid"}, []string{envFile}); err == nil {
+		t.Fatal("accepted OpenAI base URL alongside OAuth kit reference")
 	}
 }
 

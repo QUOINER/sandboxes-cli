@@ -14,7 +14,34 @@ const (
 	maxExecEnvEntry   = 64 * 1024
 	maxExecEnvTotal   = 256 * 1024
 	maxExecEnvFile    = 1024 * 1024
+	openAIAPIKeyEnv   = "OPENAI_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
+	openAIOAuthEnvRef = openAIAPIKeyEnv + "=${oauth:openai}"
 )
+
+func validateOAuthProxyEnvironment(env []string) error {
+	markerCount := 0
+	openAIKeyCount := 0
+	baseURLCount := 0
+	for _, entry := range env {
+		key, _, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		if entry == openAIOAuthEnvRef {
+			markerCount++
+		}
+		if key == openAIAPIKeyEnv {
+			openAIKeyCount++
+		}
+		if key == "OPENAI_BASE_URL" {
+			baseURLCount++
+		}
+	}
+	if markerCount > 1 || markerCount == 1 && (openAIKeyCount != 1 || baseURLCount > 0) {
+		return errors.New("OpenAI OAuth kit reference conflicts with an explicit or duplicate OpenAI environment value")
+	}
+	return nil
+}
 
 func buildExecEnv(entries, files []string) ([]string, error) {
 	env := make([]string, 0, len(entries))
@@ -43,6 +70,9 @@ func buildExecEnv(entries, files []string) ([]string, error) {
 		if total > maxExecEnvTotal {
 			return nil, errors.New("environment overrides are too large")
 		}
+	}
+	if err := validateOAuthProxyEnvironment(env); err != nil {
+		return nil, err
 	}
 	return env, nil
 }

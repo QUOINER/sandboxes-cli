@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/gdamore/tcell/v3 v3.4.1
-	github.com/rheic/sandboxes-go-sdk v0.0.14
+	github.com/rheic/sandboxes-go-sdk v0.0.15
 	golang.org/x/term v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )

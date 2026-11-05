@@ -25,7 +25,7 @@ var completionTree = map[string][]string{
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {forceFlag},
-	secretCommand:     {"--registry", usernameFlag, "--password-stdin", "--all-sandboxes", sandboxFlag},
+	secretCommand:     {"--registry", usernameFlag, "--password-stdin", "--all-sandboxes", sandboxFlag, oauthFlag},
 	"version":         {formatFlag, jsonFlag},
 	completionCommand: {},
 	"help":            {},
