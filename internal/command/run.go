@@ -91,6 +91,9 @@ Flags:
 	jsonFlag          = "--json"
 	workdirFlag       = "--workdir"
 	forceFlag         = "--force"
+	globalFlag        = "--global"
+	registryFlag      = "--registry"
+	globalScopeLabel  = "(global)"
 	userFlag          = "--user"
 	sandboxFlag       = "--sandbox"
 	graceFlag         = "--grace"
@@ -117,23 +120,24 @@ type runResources struct {
 }
 
 type runOptions struct {
-	name       string
-	new        bool
-	image      string
-	publish    []string
-	allow      []string
-	deny       []string
-	profile    string
-	privileged bool
-	kit        string
-	denyWrite  []string
-	cpus       uint
-	memory     string
-	env        []string
-	envFiles   []string
-	detach     bool
-	remove     bool
-	help       bool
+	name             string
+	new              bool
+	image            string
+	publish          []string
+	allow            []string
+	deny             []string
+	profile          string
+	privileged       bool
+	kit              string
+	denyWrite        []string
+	cpus             uint
+	memory           string
+	env              []string
+	oauthCredentials []sdk.OAuthCredential
+	envFiles         []string
+	detach           bool
+	remove           bool
+	help             bool
 }
 
 // run creates or reuses a sandbox, starts it, and attaches an agent session.
@@ -158,18 +162,10 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
 		return 2
 	}
-	if opts.kit != "" {
-		if err := applyKit(ctx, opts.kit, &agent, &opts.image, &opts.profile, &workspacePaths); err != nil {
-			_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
-			return 2
-		}
-		workspacesExplicit = true
-	}
-	if len(opts.denyWrite) > 0 {
-		for _, target := range opts.denyWrite {
-			workspacePaths = append(workspacePaths, target+":ro")
-		}
-		workspacesExplicit = true
+	workspacePaths, workspacesExplicit, err = prepareRunKitOptions(ctx, &opts, &agent, workspacePaths, workspacesExplicit)
+	if err != nil {
+		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
+		return 2
 	}
 	if err := validateRunRequest(opts, agent); err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx run: %v\n", err)
@@ -194,6 +190,11 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	resources.env, err = prepareCodexCredentials(ctx, client, agent, opts.name, resources.env)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
 
 	sandbox, created, workspaces, err := r.reuseOrCreateSandbox(ctx, client, opts, agent, workspacePaths, workspacesExplicit, resources)
 	if err != nil {
@@ -201,6 +202,90 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		return 1
 	}
 	return r.runAttached(ctx, client, opts, sandbox, created, agent, workspaces, workspacesExplicit, agentArgs, resources)
+}
+
+func prepareRunKitOptions(ctx context.Context, opts *runOptions, agent *string, workspacePaths []string, workspacesExplicit bool) ([]string, bool, error) {
+	if opts.kit != "" {
+		if err := applyKit(ctx, opts.kit, agent, &opts.image, &opts.profile, &workspacePaths, &opts.env, &opts.oauthCredentials); err != nil {
+			return nil, false, err
+		}
+		workspacesExplicit = true
+	}
+	for _, target := range opts.denyWrite {
+		workspacePaths = append(workspacePaths, target+":ro")
+		workspacesExplicit = true
+	}
+	return workspacePaths, workspacesExplicit, nil
+}
+
+func usesOpenAIOAuthReference(env []string) bool {
+	for _, entry := range env {
+		if entry == openAIOAuthEnvRef {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureOpenAIOAuthLogin(ctx context.Context, client sdk.Client, env []string) error {
+	if !usesOpenAIOAuthReference(env) {
+		return nil
+	}
+	present, err := sdk.AccountStatus(client).Status(ctx, "openai")
+	if err != nil {
+		return fmt.Errorf("check OpenAI OAuth credentials: %w", err)
+	}
+	if present {
+		return nil
+	}
+	if err := sdk.Accounts(client).Login(ctx, "openai"); err != nil {
+		return fmt.Errorf("sign in to OpenAI before launching the kit: %w", err)
+	}
+	return nil
+}
+
+func prepareCodexCredentials(ctx context.Context, client sdk.Client, agent, sandboxName string, env []string) ([]string, error) {
+	if usesOpenAIOAuthReference(env) {
+		if err := ensureOpenAIOAuthLogin(ctx, client, env); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+	if agent != "codex" {
+		return env, nil
+	}
+	if hasEnvironmentKey(env, "OPENAI_API_KEY") || hasEnvironmentKey(env, "OPENAI_BASE_URL") {
+		return env, nil
+	}
+	secrets, err := sdk.Secrets(client).List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check stored OpenAI API credentials: %w", err)
+	}
+	for _, secret := range secrets {
+		if secret.Service == "openai" && (secret.Scope == sdk.SecretScopeGlobal || secret.SandboxName == sandboxName && sandboxName != "") {
+			return append(env, "OPENAI_API_KEY=${proxy:openai}"), nil
+		}
+	}
+	present, err := sdk.AccountStatus(client).Status(ctx, "openai")
+	if err != nil {
+		return nil, fmt.Errorf("check OpenAI OAuth credentials: %w", err)
+	}
+	if !present {
+		if err := sdk.Accounts(client).Login(ctx, "openai"); err != nil {
+			return nil, fmt.Errorf("sign in to OpenAI before launching Codex: %w", err)
+		}
+	}
+	return append(env, openAIOAuthEnvRef), nil
+}
+
+func hasEnvironmentKey(env []string, target string) bool {
+	for _, entry := range env {
+		key, _, found := strings.Cut(entry, "=")
+		if found && key == target {
+			return true
+		}
+	}
+	return false
 }
 
 //nolint:gocognit,gocyclo,cyclop,nestif,gocritic // attach/terminal/detach semantics form one transaction.
@@ -311,6 +396,9 @@ func prepareRunResources(opts runOptions) (runResources, error) {
 	}
 	env, err := buildExecEnv(opts.env, opts.envFiles)
 	if err != nil {
+		return runResources{}, err
+	}
+	if err := validateOAuthProxyEnvironment(env); err != nil {
 		return runResources{}, err
 	}
 	return runResources{cpus: cpus, memory: memoryMiB, env: env, profile: opts.profile, ports: ports, allow: allow, deny: deny}, nil
@@ -775,20 +863,21 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 		workspace = workspaces[0].Path
 	}
 	op, err := client.Sandboxes().Create(ctx, sdk.CreateRequest{
-		Name:          name,
-		Image:         opts.image,
-		Workspace:     workspace,
-		Workspaces:    workspaces,
-		Ports:         resources.ports,
-		Allow:         resources.allow,
-		Deny:          resources.deny,
-		Agent:         agent,
-		Detached:      opts.detach,
-		CPUs:          resources.cpus,
-		MemoryMiB:     resources.memory,
-		PolicyProfile: resources.profile,
-		Privileged:    opts.privileged,
-		Env:           envMap(withoutInjectedSecrets(resources.env)),
+		Name:             name,
+		Image:            opts.image,
+		Workspace:        workspace,
+		Workspaces:       workspaces,
+		Ports:            resources.ports,
+		Allow:            resources.allow,
+		Deny:             resources.deny,
+		Agent:            agent,
+		Detached:         opts.detach,
+		CPUs:             resources.cpus,
+		MemoryMiB:        resources.memory,
+		PolicyProfile:    resources.profile,
+		Privileged:       opts.privileged,
+		Env:              envMap(withoutInjectedSecrets(resources.env)),
+		OAuthCredentials: opts.oauthCredentials,
 	})
 	if err != nil {
 		return r.recoverRunCreate(ctx, client, opts, err)

@@ -22,10 +22,11 @@ var completionTree = map[string][]string{
 	"rm":              {"-f", forceFlag, "--all", formatFlag, jsonFlag},
 	"prune":           {"--dry-run", "-f", forceFlag, "--filter", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
+	commandAgents:     {},
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
-	"logout":          {forceFlag},
-	secretCommand:     {"--registry", usernameFlag, "--password-stdin", "--all-sandboxes", sandboxFlag},
+	"logout":          {"-f", forceFlag},
+	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", "--command", globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	completionCommand: {},
 	"help":            {},
@@ -33,7 +34,7 @@ var completionTree = map[string][]string{
 
 var completionSubcommands = map[string][]string{
 	policyCommand:     {"ls", commandInspect, actionAllow, actionDeny, "rm", "check", networkKeyword},
-	secretCommand:     {"ls", commandSet, "rm"},
+	secretCommand:     {"import", "ls", commandList, commandSet, commandSetCustom, "rm", commandRemove, commandDelete, commandUnset},
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 }
 
@@ -161,7 +162,11 @@ func fishCompletionScript() string {
 	}
 	for _, name := range sortedKeys(completionTree) {
 		for _, flag := range completionTree[name] {
-			fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -l %s\n", name, strings.TrimLeft(flag, "-"))
+			if strings.HasPrefix(flag, "--") {
+				fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -l %s\n", name, strings.TrimPrefix(flag, "--"))
+			} else if len(flag) == 2 && strings.HasPrefix(flag, "-") {
+				fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -s %s\n", name, strings.TrimPrefix(flag, "-"))
+			}
 		}
 		for _, sub := range completionSubcommands[name] {
 			fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -a %s\n", name, sub)
@@ -230,7 +235,7 @@ func flagsTakingValue(flags []string) []string {
 		envFileFlag: true, "--workspace": true, "--idempotency-key": true,
 		"-w": true, workdirFlag: true, "-u": true, userFlag: true,
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
-		usernameFlag: true, "--registry": true, sandboxFlag: true,
+		usernameFlag: true, registryFlag: true, sandboxFlag: true,
 	}
 	out := make([]string, 0, len(flags))
 	for _, flag := range flags {

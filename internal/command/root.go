@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v3"
 	"golang.org/x/term"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
@@ -31,8 +32,13 @@ const (
 	commandInspect    = "inspect"
 	commandReset      = "reset"
 	stateUnavailable  = "unavailable"
+	commandAgents     = "agents"
 	commandList       = "list"
+	commandDelete     = "delete"
+	commandRemove     = "remove"
+	commandUnset      = "unset"
 	commandSet        = "set"
+	commandSetCustom  = "set-custom"
 	schemeHTTPS       = "https"
 	reasonDefaultDeny = "default deny"
 )
@@ -75,11 +81,12 @@ Remove stopped sandboxes. --dry-run lists candidates without removing them;
 
 // Runner executes commands against a local daemon.
 type Runner struct {
-	Out       io.Writer
-	Err       io.Writer
-	In        io.Reader
-	Socket    string
-	NewClient func(address string) (sdk.Client, error)
+	Out          io.Writer
+	Err          io.Writer
+	In           io.Reader
+	Socket       string
+	NewClient    func(address string) (sdk.Client, error)
+	SecretScreen func() tcell.Screen
 }
 
 // NewRunner creates a CLI runner.
@@ -136,7 +143,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.start(ctx, rest[1:])
 	case stopCommand:
 		return r.stop(ctx, rest[1:])
-	case "rm", "delete":
+	case "rm", commandDelete:
 		return r.remove(ctx, rest[1:])
 	case "wait":
 		return r.wait(ctx, rest[1:])
@@ -204,7 +211,7 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.reset(ctx, args), true
 	case "tui":
 		return r.tui(ctx, args), true
-	case "volume", "env", "mcp", "move", "ttl", "setup", "skills":
+	case commandAgents, "volume", "env", "mcp", "move", "ttl", "setup", "skills":
 		return r.unsupportedFamily(name), true
 	case completionCommand:
 		return r.completion(args), true
@@ -217,9 +224,18 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "usage: rsbx login [--username USER --password-stdin]")
-		_, _ = fmt.Fprintln(fs.Output(), "Without flags, complete Docker device authorization in your browser.")
-		fs.PrintDefaults()
+		_, _ = fmt.Fprintln(fs.Output(), "Description:")
+		_, _ = fmt.Fprintln(fs.Output(), "  Sign in to Docker")
+		_, _ = fmt.Fprintln(fs.Output(), "\nUsage:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx login [flags]")
+		_, _ = fmt.Fprintln(fs.Output(), "\nExamples:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx login")
+		_, _ = fmt.Fprintln(fs.Output(), "\n  # Non-interactive sign-in, for CI")
+		_, _ = fmt.Fprintln(fs.Output(), "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
+		_, _ = fmt.Fprintln(fs.Output(), "\nFlags:")
+		_, _ = fmt.Fprintln(fs.Output(), "  -h, --help              help for login")
+		_, _ = fmt.Fprintln(fs.Output(), "      --password-stdin    Read password or access token from stdin")
+		_, _ = fmt.Fprintln(fs.Output(), "      --username string   Docker username for non-interactive login")
 	}
 	username := fs.String("username", "", "Docker Hub username for PAT login")
 	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
@@ -323,7 +339,21 @@ func readDockerPassword(input io.Reader) ([]byte, error) {
 func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "Description:")
+		_, _ = fmt.Fprintln(fs.Output(), "  Stop running local sandboxes and sign out of Docker")
+		_, _ = fmt.Fprintln(fs.Output(), "\nUsage:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout [flags]")
+		_, _ = fmt.Fprintln(fs.Output(), "\nExamples:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout")
+		_, _ = fmt.Fprintln(fs.Output(), "\n  # Skip the confirmation prompt")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout --force")
+		_, _ = fmt.Fprintln(fs.Output(), "\nFlags:")
+		_, _ = fmt.Fprintln(fs.Output(), "  -f, --force   Skip confirmation prompt")
+		_, _ = fmt.Fprintln(fs.Output(), "  -h, --help    help for logout")
+	}
 	force := fs.Bool("force", false, "skip confirmation")
+	forceShort := fs.Bool("f", false, "skip confirmation")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -334,7 +364,7 @@ func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx logout [--force]")
 		return 2
 	}
-	if !*force {
+	if !*force && !*forceShort {
 		confirmed, err := r.confirmLogout()
 		if err != nil {
 			r.error(err)
@@ -448,32 +478,348 @@ func (r *Runner) stopSandbox(ctx context.Context, client sdk.Client, sandbox *sd
 
 func (r *Runner) secret(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret <set|rm> [flags]")
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret <import|set|ls|list|rm|remove|delete|unset> [flags]")
 		return 2
 	}
 	switch args[0] {
 	case helpCommand, helpShort, helpFlag:
-		_, _ = fmt.Fprintln(r.Out, "usage: rsbx secret <set|ls|rm> [flags]")
-		_, _ = fmt.Fprintln(r.Out, "commands: ls, set, rm (service secrets and registry credentials)")
-		return 0
+		return r.secretHelp()
 	case commandSet:
-		if hasFlag(args[1:], "--registry") {
-			return r.registrySet(ctx, args[1:])
+		return r.secretSetCommand(ctx, args[1:])
+	case "rm", commandRemove, commandDelete, commandUnset:
+		return r.secretRemoveCommand(ctx, args[1:])
+	case "ls", commandList:
+		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
+			return r.secretListHelp()
 		}
-		return r.serviceSecretSet(ctx, args[1:])
-	case "rm":
-		if hasFlag(args[1:], "--registry") {
-			return r.registryRemove(ctx, args[1:])
-		}
-		return r.serviceSecretRemove(ctx, args[1:])
-	case "ls":
 		return r.serviceSecretList(ctx, args[1:])
-	case "import":
-		return r.serviceSecretImport(ctx, args[1:])
+	case "import", commandSetCustom:
+		return r.secretExtendedCommand(ctx, args)
 	default:
 		_, _ = fmt.Fprintln(r.Err, "unknown secret command")
 		return 2
 	}
+}
+
+func (r *Runner) secretHelp() int {
+	_, _ = fmt.Fprintln(r.Out, "usage: rsbx secret <import|set|ls|list|rm|remove|delete|unset> [flags]")
+	_, _ = fmt.Fprintln(r.Out, "commands: import, ls (alias: list), set, rm (aliases: remove, delete, unset; service secrets and registry credentials)")
+	_, _ = fmt.Fprintln(r.Out, "set-custom is not implemented; custom secret values are never stored or injected")
+	return 0
+}
+
+func (r *Runner) secretSetCommand(ctx context.Context, args []string) int {
+	if hasFlag(args, "--help") || hasFlag(args, "-h") {
+		return r.secretSetHelp()
+	}
+	if hasFlag(args, registryFlag) {
+		return r.registrySet(ctx, args)
+	}
+	return r.serviceSecretSet(ctx, args)
+}
+
+func (r *Runner) secretRemoveCommand(ctx context.Context, args []string) int {
+	if hasFlag(args, "--help") || hasFlag(args, "-h") {
+		return r.secretRemoveHelp()
+	}
+	if hasFlag(args, "--all") && hasFlag(args, globalFlag) {
+		_, _ = fmt.Fprintln(r.Err, "error: if any flags in the group [all global] are set none of the others can be; [all global] were all set\n  try: rsbx secret rm --help")
+		return 1
+	}
+	if hasFlag(args, "--all") {
+		return r.serviceSecretRemoveAll(ctx, args)
+	}
+	if hasFlag(args, "--all-sandboxes") && !hasFlag(args, registryFlag) {
+		_, _ = fmt.Fprintln(r.Err, "error: --all-sandboxes requires --registry\n  try: rsbx secret rm --help")
+		return 1
+	}
+	if hasFlag(args, registryFlag) || hasFlag(args, "--all-sandboxes") {
+		return r.registryRemove(ctx, args)
+	}
+	return r.serviceSecretRemove(ctx, args)
+}
+
+func (r *Runner) secretExtendedCommand(ctx context.Context, args []string) int {
+	if args[0] == commandSetCustom {
+		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
+			return r.secretCustomHelp()
+		}
+		_, _ = fmt.Fprintln(r.Err, "rsbx secret set-custom: unsupported: custom secret storage and proxy substitution are not implemented; no secret was stored")
+		return 1
+	}
+	if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
+		return r.secretImportHelp()
+	}
+	return r.serviceSecretImport(ctx, args[1:])
+}
+
+func (r *Runner) secretCustomHelp() int {
+	const usage = `Description:
+  Docker sbx supports custom secrets by storing a placeholder in the sandbox and
+  replacing it in matching outbound request headers. Rheic does not implement
+  custom-secret storage or proxy substitution yet.
+
+Status:
+  Unsupported. This command will not store or inject a secret.
+
+Usage:
+  rsbx secret set-custom [flags]
+
+Docker sbx option families include --host, --env, --name, --placeholder,
+--header, --format, --value, --token, --ref, --command, --sandbox, and --refresh.
+Passing these options to Rheic currently fails closed.
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) secretSetHelp() int {
+	const usage = `Description:
+  Create or update a service secret.
+
+Available services:
+  anthropic, copilot, cursor, devin, droid, github, google, groq, mistral,
+  nebius, openai, openrouter, xai
+
+Usage:
+  rsbx secret set [SERVICE] [flags]
+
+When SERVICE is omitted, choose it with the arrow keys and Enter. Press q or
+Escape to cancel. Values are stored in the host credential vault. Without
+--force, an existing value is never overwritten. For scripts, pass SERVICE
+explicitly and provide the value with --token or standard input.
+
+Examples:
+  rsbx secret set github
+  rsbx secret set openai --sandbox my-sandbox
+  rsbx secret set openai --oauth
+  rsbx secret set github -t VALUE
+
+Flags:
+      --sandbox string  Scope the secret to one sandbox
+  -t, --token string   Secret value (less secure: visible in shell history)
+      --oauth           Sign in to the global OpenAI account on the host
+      --ref string      Secret reference (not implemented)
+      --command string  Secret command (not implemented)
+  -f, --force           Overwrite an existing secret
+  -h, --help            Show this help
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) secretRemoveHelp() int {
+	const usage = `Description:
+  Remove a service or registry credential.
+
+Usage:
+  rsbx secret rm [SERVICE] [flags]
+  rsbx secret rm --registry HOST [flags]
+  rsbx secret rm --all [--force]
+
+Aliases:
+  rm, remove, delete, unset
+
+Examples:
+  rsbx secret rm
+  rsbx secret rm openai
+  rsbx secret rm openai --sandbox my-sandbox
+  rsbx secret rm openai --oauth
+  rsbx secret rm --registry ghcr.io --all-sandboxes --force
+
+Flags:
+      --oauth             Remove host-side OpenAI OAuth credentials
+      --all               Remove inventoried Rheic credentials across scopes
+      --registry string   Registry hostname; without a scope flag removes host-only and all-sandboxes credentials
+      --all-sandboxes     Remove the all-sandboxes registry credential (requires --registry)
+      --sandbox string    Scope service or registry credentials to one sandbox
+  -f, --force             Delete without confirmation prompt
+  -h, --help              Show this help
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) secretListHelp() int {
+	const usage = `Description:
+  List stored secrets across global and sandbox scopes. Secret values are never
+  displayed. Use --global or --sandbox to limit the inventory, and --service to
+  filter by provider.
+
+Usage:
+  rsbx secret ls [flags]
+
+Aliases:
+  ls, list
+
+Examples:
+  rsbx secret ls
+  rsbx secret ls -g
+  rsbx secret ls --sandbox my-sandbox
+  rsbx secret ls --service github
+  rsbx secret ls --json
+
+Flags:
+      --format string   Output format: table, json or yaml
+  -g, --global          Only list global secrets
+  -h, --help            Show this help
+      --json            Output in JSON format
+  -q, --quiet           Only display secret names
+      --sandbox string  Only list secrets scoped to one sandbox
+      --service string  Filter by secret service name
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) serviceSecretRemoveAll(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
+	fs.SetOutput(r.Err)
+	all := fs.Bool("all", false, "remove inventoried host credentials")
+	force := fs.Bool("force", false, "delete without confirmation prompt")
+	fs.BoolVar(force, "f", false, "delete without confirmation prompt")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("secret rm", err)
+	}
+	if !*all || fs.NArg() != 0 {
+		if *all && fs.NArg() != 0 {
+			_, _ = fmt.Fprintln(r.Err, "error: cannot specify a SERVICE argument when using --all\n  try: rsbx secret rm --help")
+			return 1
+		}
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret rm --all [--force]")
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	inventory, err := loadSecretRemovalInventory(ctx, client)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("all %d inventoried host credentials", inventory.count()), *force)
+	if code != 0 {
+		return code
+	}
+	if !confirmed {
+		return 0
+	}
+	removed, err := removeSecretRemovalInventory(ctx, client, inventory)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(r.Out, "Removed %d inventoried Rheic-managed host credentials\n", removed)
+	_, _ = fmt.Fprintln(r.Out, "Custom-secret storage is unavailable and was not included.")
+	return 0
+}
+
+type secretRemovalInventory struct {
+	services   []sdk.ServiceSecret
+	registries []sdk.RegistryCredentialSummary
+	accounts   []string
+}
+
+func (i secretRemovalInventory) count() int {
+	return len(i.services) + len(i.registries) + len(i.accounts)
+}
+
+func loadSecretRemovalInventory(ctx context.Context, client sdk.Client) (secretRemovalInventory, error) {
+	services, err := sdk.Secrets(client).List(ctx)
+	if err != nil {
+		return secretRemovalInventory{}, fmt.Errorf("list service credentials before removal: %w", err)
+	}
+	registryLister, ok := sdk.RegistryCredentialList(client)
+	if !ok {
+		return secretRemovalInventory{}, errors.New("this client cannot list registry credentials; refusing incomplete --all removal")
+	}
+	registries, err := registryLister.ListRegistryCredentials(ctx)
+	if err != nil {
+		return secretRemovalInventory{}, fmt.Errorf("list registry credentials before removal: %w", err)
+	}
+	inventory := secretRemovalInventory{services: services, registries: registries}
+	for _, provider := range []string{"docker", openAIService} {
+		present, err := sdk.AccountStatus(client).Status(ctx, provider)
+		if err != nil {
+			return secretRemovalInventory{}, fmt.Errorf("check %s account credentials before removal: %w", provider, err)
+		}
+		if present {
+			inventory.accounts = append(inventory.accounts, provider)
+		}
+	}
+	return inventory, nil
+}
+
+func removeSecretRemovalInventory(ctx context.Context, client sdk.Client, inventory secretRemovalInventory) (int, error) {
+	removed, err := removeServiceSecretInventory(ctx, sdk.Secrets(client), inventory.services)
+	if err != nil {
+		return removed, err
+	}
+	removed, err = removeRegistrySecretInventory(ctx, client.RegistryCredentials(), inventory.registries, removed)
+	if err != nil {
+		return removed, err
+	}
+	return removeAccountInventory(ctx, sdk.Accounts(client), inventory.accounts, removed)
+}
+
+func removeServiceSecretInventory(ctx context.Context, secrets sdk.SecretService, items []sdk.ServiceSecret) (int, error) {
+	removed := 0
+	for _, item := range items {
+		ok, err := secrets.Remove(ctx, item.Service, item.Scope, item.SandboxName)
+		if err != nil {
+			return removed, fmt.Errorf("partial credential removal after %d entries: %w", removed, err)
+		}
+		if ok {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+func removeRegistrySecretInventory(ctx context.Context, registries sdk.RegistryCredentialService, items []sdk.RegistryCredentialSummary, removed int) (int, error) {
+	for _, item := range items {
+		response, err := registries.Logout(ctx, sdk.RegistryLogoutRequest{
+			Registry: item.Registry, Scope: sdk.RegistryCredentialScope(item.Scope), SandboxName: item.SandboxName,
+		})
+		if err != nil {
+			return removed, fmt.Errorf("partial credential removal after %d entries: %w", removed, err)
+		}
+		if response != nil && response.Removed {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+func removeAccountInventory(ctx context.Context, accounts sdk.AccountService, providers []string, removed int) (int, error) {
+	for _, provider := range providers {
+		ok, err := accounts.Logout(ctx, provider)
+		if err != nil {
+			return removed, fmt.Errorf("partial credential removal after %d entries: %w", removed, err)
+		}
+		if ok {
+			removed++
+		}
+	}
+	return removed, nil
 }
 
 // reorderFlagArgs moves flags and their values before positionals so the
@@ -507,13 +853,14 @@ func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 
 func (r *Runner) unsupportedFamily(name string) int {
 	reasons := map[string]string{
-		"volume": "persistent volumes are cloud-only in this build",
-		"env":    "declarative sbxenv files are not implemented",
-		"mcp":    "the MCP gateway is not implemented",
-		"move":   "cloud move is unavailable without a tenant",
-		"ttl":    "cloud TTL is unavailable without a tenant",
-		"setup":  "host setup is not implemented",
-		"skills": "skills management is not implemented",
+		commandAgents: "agent management commands are not implemented; use run with a supported agent",
+		"volume":      "persistent volumes are cloud-only in this build",
+		"env":         "declarative sbxenv files are not implemented",
+		"mcp":         "the MCP gateway is not implemented",
+		"move":        "cloud move is unavailable without a tenant",
+		"ttl":         "cloud TTL is unavailable without a tenant",
+		"setup":       "host setup is not implemented",
+		"skills":      "skills management is not implemented",
 	}
 	_, _ = fmt.Fprintf(r.Err, "rsbx %s: unsupported: %s\n", name, reasons[name])
 	return 1
@@ -531,27 +878,59 @@ func hasFlag(args []string, name string) bool {
 	return false
 }
 
+func (r *Runner) confirmSecretRemoval(target string, force bool) (bool, int) {
+	if force {
+		return true, 0
+	}
+	input, ok := r.In.(*os.File)
+	if !ok || !term.IsTerminal(int(input.Fd())) {
+		_, _ = fmt.Fprintln(r.Err, "error: stdin is not a terminal; use --force to skip confirmation")
+		return false, 1
+	}
+	if _, err := fmt.Fprintf(r.Err, "Remove %s? [y/N] ", sanitizeTerminalText(target)); err != nil {
+		r.error(err)
+		return false, 1
+	}
+	answer, err := bufio.NewReader(r.In).ReadString('\n')
+	if err != nil && answer == "" {
+		r.error(errors.New("could not read confirmation"))
+		return false, 1
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true, 0
+	default:
+		_, _ = fmt.Fprintln(r.Err, "Removal canceled")
+		return false, 0
+	}
+}
+
 func (r *Runner) registryRemove(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, sandboxFlag: true, "--all-sandboxes": false, globalFlag: false, forceFlag: false, "-f": false})
 	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	registry := fs.String("registry", "", "registry host")
 	allSandboxes := fs.Bool("all-sandboxes", false, "remove all-sandboxes credential")
 	sandboxName := fs.String("sandbox", "", "remove credential for one sandbox")
+	global := fs.Bool("global", false, "deprecated: remove global credential")
+	force := fs.Bool("force", false, "delete without confirmation prompt")
+	fs.BoolVar(force, "f", false, "delete without confirmation prompt")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("secret rm", err)
 	}
-	if fs.NArg() != 0 || *registry == "" || *allSandboxes && *sandboxName != "" {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret rm [--registry HOST] [--all-sandboxes | --sandbox NAME]")
-		return 2
+	if message, code := registryRemovalArgumentError(*registry, fs.NArg(), *sandboxName, *global, *allSandboxes); code != 0 {
+		_, _ = fmt.Fprintln(r.Err, message)
+		return code
 	}
-	scope := sdk.RegistryScopeHostOnly
-	if *allSandboxes {
-		scope = sdk.RegistryScopeAllSandboxes
-	} else if *sandboxName != "" {
-		scope = sdk.RegistryScopeSandbox
+	if fs.NArg() == 1 {
+		*sandboxName = fs.Arg(0)
+		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use --sandbox %s with --registry\n", sanitizeTerminalText(*sandboxName))
+	}
+	if *global {
+		_, _ = fmt.Fprintln(r.Err, "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry")
 	}
 	client, err := r.client()
 	if err != nil {
@@ -559,17 +938,113 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	response, err := client.RegistryCredentials().Logout(ctx, sdk.RegistryLogoutRequest{
-		Registry: *registry, Scope: scope, SandboxName: *sandboxName,
-	})
-	if err != nil {
-		r.error(err)
+	scopes := registryRemovalScopes(*sandboxName, *global, *allSandboxes)
+	lister, ok := sdk.RegistryCredentialList(client)
+	if !ok {
+		r.error(errors.New("registry credential inventory is unavailable; refusing removal before confirmation"))
 		return 1
 	}
-	if response.Removed {
-		_, _ = fmt.Fprintf(r.Out, "Removed registry credentials for %s (%s)\n", *registry, scope)
-	} else {
-		_, _ = fmt.Fprintf(r.Out, "No registry credentials stored for %s (%s)\n", *registry, scope)
+	items, err := lister.ListRegistryCredentials(ctx)
+	if err != nil {
+		r.error(fmt.Errorf("list registry credentials before removal: %w", err))
+		return 1
+	}
+	if !registryCredentialPresent(items, *registry, *sandboxName, scopes) {
+		scopeName := registryRemovalScopeName(*sandboxName, *allSandboxes)
+		_, _ = fmt.Fprintf(r.Err, "error: no registry secret found for %q in scope %q\n", *registry, scopeName)
+		return 1
+	}
+	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("registry credentials for %s", *registry), *force)
+	if code != 0 {
+		return code
+	}
+	if !confirmed {
+		return 0
+	}
+	return r.removeRegistryScopes(ctx, client, *registry, *sandboxName, scopes)
+}
+
+func registryCredentialPresent(items []sdk.RegistryCredentialSummary, registry, sandboxName string, scopes []sdk.RegistryCredentialScope) bool {
+	for _, item := range items {
+		if item.Registry != registry || item.SandboxName != sandboxName {
+			continue
+		}
+		for _, scope := range scopes {
+			if item.Scope == string(scope) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func registryRemovalScopeName(sandboxName string, allSandboxes bool) string {
+	if sandboxName != "" {
+		return sandboxName
+	}
+	if allSandboxes {
+		return "(all-sandboxes)"
+	}
+	// Both explicit global and default registry removal use Docker's global label.
+	return globalScopeLabel
+}
+
+func registryRemovalArgumentError(registry string, positionals int, sandboxName string, global, allSandboxes bool) (string, int) {
+	if conflict := registryRemovalScopeConflict(global, allSandboxes, sandboxName != ""); conflict != "" {
+		return conflict, 1
+	}
+	if registry == "" || positionals > 1 {
+		return "usage: rsbx secret rm [--registry HOST] [--all-sandboxes | --sandbox NAME]", 2
+	}
+	if positionals == 1 && (sandboxName != "" || global || allSandboxes) {
+		return "error: cannot combine a positional sandbox name with a scope flag\n  try: rsbx secret rm --help", 1
+	}
+	return "", 0
+}
+
+func registryRemovalScopes(sandboxName string, global, allSandboxes bool) []sdk.RegistryCredentialScope {
+	if allSandboxes {
+		return []sdk.RegistryCredentialScope{sdk.RegistryScopeAllSandboxes}
+	}
+	if sandboxName != "" {
+		return []sdk.RegistryCredentialScope{sdk.RegistryScopeSandbox}
+	}
+	if global {
+		return []sdk.RegistryCredentialScope{sdk.RegistryScopeHostOnly}
+	}
+	return []sdk.RegistryCredentialScope{sdk.RegistryScopeHostOnly, sdk.RegistryScopeAllSandboxes}
+}
+
+func registryRemovalScopeConflict(global, allSandboxes, sandbox bool) string {
+	if global && allSandboxes {
+		return "error: cannot specify both --global and --all-sandboxes\n  try: rsbx secret rm --help"
+	}
+	if sandbox && (global || allSandboxes) {
+		return "error: cannot combine --sandbox with --global or --all-sandboxes\n  try: rsbx secret rm --help"
+	}
+	return ""
+}
+
+func (r *Runner) removeRegistryScopes(ctx context.Context, client sdk.Client, registry, sandboxName string, scopes []sdk.RegistryCredentialScope) int {
+	removedAny := false
+	for _, scope := range scopes {
+		response, err := client.RegistryCredentials().Logout(ctx, sdk.RegistryLogoutRequest{
+			Registry: registry, Scope: scope, SandboxName: sandboxName,
+		})
+		if err != nil {
+			if removedAny {
+				r.error(fmt.Errorf("partial registry credential removal for %s: %w", registry, err))
+			} else {
+				r.error(err)
+			}
+			return 1
+		}
+		removedAny = removedAny || response.Removed
+		status := "No registry credentials stored"
+		if response.Removed {
+			status = "Removed registry credentials"
+		}
+		_, _ = fmt.Fprintf(r.Out, "%s for %s (%s)\n", status, sanitizeTerminalText(registry), scope)
 	}
 	return 0
 }
@@ -703,20 +1178,21 @@ func (r *Runner) readLoginPassword(fromStdin bool) ([]byte, error) {
 }
 
 type createOptions struct {
-	name           string
-	agent          string
-	image          string
-	workspace      string
-	idempotencyKey string
-	workspaces     []sdk.Workspace
-	ports          []sdk.Port
-	allow          []sdk.NetworkRule
-	deny           []sdk.NetworkRule
-	cpus           uint32
-	memoryMiB      uint32
-	env            []string
-	profile        string
-	privileged     bool
+	name             string
+	agent            string
+	image            string
+	workspace        string
+	idempotencyKey   string
+	workspaces       []sdk.Workspace
+	ports            []sdk.Port
+	allow            []sdk.NetworkRule
+	deny             []sdk.NetworkRule
+	cpus             uint32
+	memoryMiB        uint32
+	env              []string
+	oauthCredentials []sdk.OAuthCredential
+	profile          string
+	privileged       bool
 }
 
 func (r *Runner) create(ctx context.Context, args []string) int {
@@ -751,20 +1227,21 @@ func (r *Runner) create(ctx context.Context, args []string) int {
 		}
 	}
 	op, err := client.Sandboxes().Create(ctx, sdk.CreateRequest{
-		Name:           name,
-		Image:          opts.image,
-		Workspace:      opts.workspace,
-		Workspaces:     opts.workspaces,
-		Ports:          opts.ports,
-		Allow:          opts.allow,
-		Deny:           opts.deny,
-		IdempotencyKey: opts.idempotencyKey,
-		Agent:          opts.agent,
-		CPUs:           opts.cpus,
-		MemoryMiB:      opts.memoryMiB,
-		PolicyProfile:  opts.profile,
-		Privileged:     opts.privileged,
-		Env:            envMap(opts.env),
+		Name:             name,
+		Image:            opts.image,
+		Workspace:        opts.workspace,
+		Workspaces:       opts.workspaces,
+		Ports:            opts.ports,
+		Allow:            opts.allow,
+		Deny:             opts.deny,
+		IdempotencyKey:   opts.idempotencyKey,
+		Agent:            opts.agent,
+		CPUs:             opts.cpus,
+		MemoryMiB:        opts.memoryMiB,
+		PolicyProfile:    opts.profile,
+		Privileged:       opts.privileged,
+		Env:              envMap(opts.env),
+		OAuthCredentials: opts.oauthCredentials,
 	})
 	if err != nil {
 		r.error(err)
@@ -942,12 +1419,15 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	if err != nil {
 		return createOptions{}, false, err
 	}
+	var oauthCredentials []sdk.OAuthCredential
 	if *kitPath != "" {
 		kitPaths := []string(workspaceFlags)
-		if err := applyKit(ctx, *kitPath, &agent, &imageRef, profile, &kitPaths); err != nil {
+		kitEnv := []string(envFlags)
+		if err := applyKit(ctx, *kitPath, &agent, &imageRef, profile, &kitPaths, &kitEnv, &oauthCredentials); err != nil {
 			return createOptions{}, false, err
 		}
 		workspaceFlags = kitPaths
+		envFlags = stringListFlag(kitEnv)
 	}
 	applyAgentDefaults(agent, &imageRef, privileged)
 	cpuCount, memoryMiB, err := validateCreateResources(*cpus, *memory)
@@ -976,7 +1456,7 @@ func parseCreateOptions(ctx context.Context, args []string) (createOptions, bool
 	return createOptions{
 		name: name, agent: agent, image: imageRef, workspace: workspace, idempotencyKey: *idempotency,
 		workspaces: workspaces, ports: ports, allow: allow, deny: deny,
-		cpus: cpuCount, memoryMiB: memoryMiB, env: env, profile: *profile, privileged: *privileged,
+		cpus: cpuCount, memoryMiB: memoryMiB, env: env, oauthCredentials: oauthCredentials, profile: *profile, privileged: *privileged,
 	}, false, nil
 }
 
@@ -1310,10 +1790,33 @@ func (r *Runner) printSandbox(sb *sdk.Sandbox) {
 }
 
 func (r *Runner) usage() {
-	_, _ = fmt.Fprintln(r.Out, "usage: rsbx [--socket PATH] <command>")
-	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, tui, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
-	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  local daemon endpoint")
-	_, _ = fmt.Fprintln(r.Out, `Use "rsbx <command> --help" for command details.`)
+	const help = `Rheic Sandboxes manages isolated local environments for coding agents.
+
+Usage:
+  rsbx COMMAND
+
+Sandbox commands:
+  run, attach, create, exec, cp, ls, get, start, stop, rm, prune, wait, ports
+
+Management commands:
+  daemon, diagnose, login, logout, policy, reset, secret, settings, tui
+
+Extensions:
+  kit       Inspect local kit files; registry kits and builders are unavailable
+  template  List and inspect built-in templates
+
+Unsupported Docker Sandboxes commands:
+  agents, env, mcp, move, setup, skills, ttl, volume
+
+Flags:
+      --socket PATH  Local daemon endpoint
+  -h, --help         Show command help
+
+Use "rsbx COMMAND --help" for command details.
+`
+	if _, err := io.WriteString(r.Out, help); err != nil {
+		r.error(err)
+	}
 }
 
 func (r *Runner) error(err error) {

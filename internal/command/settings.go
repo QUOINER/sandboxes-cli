@@ -59,7 +59,7 @@ func (r *Runner) settings(args []string) int {
 		return r.settingsGet(args[1:])
 	case commandSet:
 		return r.settingsSet(args[1:])
-	case "unset":
+	case commandUnset:
 		return r.settingsUnset(args[1:])
 	default:
 		_, _ = fmt.Fprintf(r.Err, "rsbx settings: unknown subcommand %q\n", args[0])

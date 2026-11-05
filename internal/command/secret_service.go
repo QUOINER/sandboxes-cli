@@ -12,15 +12,21 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/gdamore/tcell/v3"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
+const (
+	openAIService = "openai"
+	oauthFlag     = "--oauth"
+)
+
 var serviceSecretNames = []string{
 	"anthropic", "copilot", "cursor", "devin", "droid", "github", "google",
-	"groq", "mistral", "nebius", "openai", "openrouter", "xai",
+	"groq", "mistral", "nebius", openAIService, "openrouter", "xai",
 }
 
 type serviceSecretOutput struct {
@@ -33,31 +39,82 @@ type serviceSecretOutput struct {
 }
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "--ref": true, "--command": true})
+	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "-t": true, "--ref": true, "--command": true, forceFlag: false, "-f": false, oauthFlag: false})
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
 	token := fs.String("token", "", "secret value (less secure: visible in shell history)")
+	fs.StringVar(token, "t", "", "secret value (less secure: visible in shell history)")
 	ref := fs.String("ref", "", "secret reference (not implemented)")
 	command := fs.String("command", "", "secret command (not implemented)")
+	oauth := fs.Bool("oauth", false, "sign in to the OpenAI account on the host")
+	force := fs.Bool("force", false, "overwrite an existing secret when --token is used")
+	fs.BoolVar(force, "f", false, "overwrite an existing secret when --token is used")
 	if code, done := r.parseFlagsOrFail("secret set", fs, args); done {
 		return code
 	}
-	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret set SERVICE [--sandbox NAME] [--token VALUE]")
+	if fs.NArg() > 1 {
+		_, _ = fmt.Fprintf(r.Err, "usage: rsbx secret set SERVICE [--sandbox NAME] [--token VALUE] [%s]\n", oauthFlag)
 		return 2
 	}
-	service := strings.ToLower(fs.Arg(0))
+	service := ""
+	switch {
+	case fs.NArg() == 1:
+		service = strings.ToLower(fs.Arg(0))
+	case *oauth:
+		service = openAIService
+	default:
+		if r.SecretScreen == nil {
+			input, ok := r.In.(*os.File)
+			if !ok || !term.IsTerminal(int(input.Fd())) {
+				r.error(errors.New("choose SERVICE interactively or provide it explicitly"))
+				return 2
+			}
+		}
+		selected, err := r.selectServiceSecret()
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if selected == "" {
+			_, _ = fmt.Fprintln(r.Out, "Secret selection canceled")
+			return 0
+		}
+		service = selected
+	}
 	if !validServiceSecret(service) {
 		r.error(fmt.Errorf("unknown service %q; use one of: %s", service, strings.Join(serviceSecretNames, ", ")))
 		return 2
+	}
+	if *oauth {
+		return r.serviceSecretOAuthSet(ctx, service, *sandboxName, *token, *ref, *command)
 	}
 	if *ref != "" || *command != "" {
 		r.error(errors.New("--ref and --command are not implemented by the local broker"))
 		return 2
 	}
-	value := []byte(*token)
-	if len(value) == 0 {
+	return r.storeServiceSecret(ctx, service, *sandboxName, *token, *force)
+}
+
+func (r *Runner) selectServiceSecret() (string, error) {
+	screen := tcell.Screen(nil)
+	if r.SecretScreen != nil {
+		screen = r.SecretScreen()
+	} else {
+		var err error
+		screen, err = tcell.NewScreen()
+		if err != nil {
+			return "", fmt.Errorf("create service selector: %w", err)
+		}
+	}
+	return selectSecretService(screen, serviceSecretNames)
+}
+
+func (r *Runner) storeServiceSecret(ctx context.Context, service, sandboxName, token string, force bool) int {
+	var value []byte
+	if token != "" {
+		value = []byte(token)
+	} else {
 		read, err := r.readServiceSecret()
 		if err != nil {
 			r.error(err)
@@ -67,7 +124,7 @@ func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
 	}
 	defer clear(value)
 	scope := sdk.SecretScopeGlobal
-	if *sandboxName != "" {
+	if sandboxName != "" {
 		scope = sdk.SecretScopeSandbox
 	}
 	client, err := r.client()
@@ -76,9 +133,24 @@ func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	summary, err := sdk.Secrets(client).Set(ctx, service, scope, *sandboxName, value)
+	secrets := sdk.Secrets(client)
+	var summary sdk.ServiceSecret
+	if force {
+		summary, err = secrets.Set(ctx, service, scope, sandboxName, value)
+	} else {
+		creator, ok := sdk.SecretCreation(client)
+		if !ok {
+			r.error(errors.New("create-only service-secret storage is not supported by this client; refusing a non-atomic write"))
+			return 1
+		}
+		summary, err = creator.Create(ctx, service, scope, sandboxName, value)
+	}
 	if err != nil {
 		r.error(err)
+		var sdkErr *sdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.Code == "already_exists" {
+			return 2
+		}
 		return 1
 	}
 	displayScope := string(summary.Scope)
@@ -86,6 +158,25 @@ func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
 		displayScope += " " + summary.SandboxName
 	}
 	_, _ = fmt.Fprintf(r.Out, "Stored %s secret (%s) in host keychain\n", summary.Service, displayScope)
+	return 0
+}
+
+func (r *Runner) serviceSecretOAuthSet(ctx context.Context, service, sandboxName, token, ref, command string) int {
+	if service != openAIService || sandboxName != "" || token != "" || ref != "" || command != "" {
+		r.error(fmt.Errorf("%s is supported only for global %s credentials and cannot be combined with value/source flags", oauthFlag, openAIService))
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	if err := sdk.Accounts(client).Login(ctx, openAIService); err != nil {
+		r.error(err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(r.Out, "Stored %s OAuth credentials in host keychain\n", openAIService)
 	return 0
 }
 
@@ -132,19 +223,58 @@ func validServiceSecret(service string) bool {
 }
 
 func (r *Runner) serviceSecretRemove(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true})
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, oauthFlag: false, globalFlag: false, forceFlag: false, "-f": false})
 	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
+	oauth := fs.Bool("oauth", false, "remove host-side OpenAI OAuth credentials")
+	global := fs.Bool("global", false, "deprecated: remove global credentials")
+	force := fs.Bool("force", false, "delete without confirmation prompt")
+	fs.BoolVar(force, "f", false, "delete without confirmation prompt")
 	if code, done := r.parseFlagsOrFail("secret rm", fs, args); done {
 		return code
 	}
-	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret rm SERVICE [--sandbox NAME]")
+	if message, code := secretRemovalArgumentError(fs.NArg(), *global, *sandboxName); code != 0 {
+		_, _ = fmt.Fprintln(r.Err, message)
+		return code
+	}
+	service := openAIService
+	if fs.NArg() == 2 {
+		*sandboxName = fs.Arg(0)
+		service = strings.ToLower(fs.Arg(1))
+		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use rsbx secret rm %s --sandbox %s\n", sanitizeTerminalText(service), sanitizeTerminalText(*sandboxName))
+	} else if fs.NArg() == 1 {
+		service = strings.ToLower(fs.Arg(0))
+	}
+	if *global {
+		_, _ = fmt.Fprintln(r.Err, "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry")
+	}
+	if fs.NArg() == 0 && !*oauth {
+		return r.serviceSecretRemoveInteractive(ctx, *sandboxName, *global)
+	}
+	if *oauth && (service != openAIService || *sandboxName != "") {
+		r.error(fmt.Errorf("%s is supported only for global %s credentials", oauthFlag, openAIService))
 		return 2
 	}
+	return r.removeNamedServiceCredentials(ctx, service, *sandboxName, *oauth, *force)
+}
+
+func secretRemovalArgumentError(positionals int, global bool, sandboxName string) (string, int) {
+	if global && sandboxName != "" {
+		return "error: cannot specify both --global and --sandbox\n  try: rsbx secret rm --help", 1
+	}
+	if positionals > 1 && (global || sandboxName != "") {
+		return "error: accepts at most 1 SERVICE argument when --global or --sandbox is used\n  try: rsbx secret rm --help", 1
+	}
+	if positionals > 2 {
+		return fmt.Sprintf("usage: rsbx secret rm SERVICE [--sandbox NAME] [%s] [--force]", oauthFlag), 2
+	}
+	return "", 0
+}
+
+func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, sandboxName string, oauth, force bool) int {
 	scope := sdk.SecretScopeGlobal
-	if *sandboxName != "" {
+	if sandboxName != "" {
 		scope = sdk.SecretScopeSandbox
 	}
 	client, err := r.client()
@@ -153,15 +283,205 @@ func (r *Runner) serviceSecretRemove(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	removed, err := sdk.Secrets(client).Remove(ctx, strings.ToLower(fs.Arg(0)), scope, *sandboxName)
+	present, servicePresent, err := namedServiceCredentialPresent(ctx, client, service, scope, sandboxName, oauth)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if !present {
+		_, _ = fmt.Fprintf(r.Err, "error: no secret found for service %q in scope %q\n", service, serviceCredentialScopeLabel(scope, sandboxName))
+		return 1
+	}
+	if servicePresent {
+		if err := writeNamedServiceRemovalCandidate(r.Out, service, serviceCredentialScopeLabel(scope, sandboxName)); err != nil {
+			r.error(err)
+			return 1
+		}
+	}
+	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("%s credentials", service), force)
+	if code != 0 {
+		return code
+	}
+	if !confirmed {
+		return 0
+	}
+	if oauth {
+		return r.removeNamedOAuthCredential(ctx, client, openAIService)
+	}
+	return r.removeNamedServiceValue(ctx, client, service, scope, sandboxName)
+}
+
+func namedServiceCredentialPresent(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string, oauthOnly bool) (bool, bool, error) {
+	servicePresent := false
+	var err error
+	if !oauthOnly {
+		servicePresent, err = serviceCredentialPresent(ctx, client, service, scope, sandboxName)
+		if err != nil {
+			return false, false, err
+		}
+	}
+	present := servicePresent
+	if oauthOnly || service == openAIService && scope == sdk.SecretScopeGlobal {
+		oauthPresent, statusErr := sdk.AccountStatus(client).Status(ctx, openAIService)
+		if statusErr != nil {
+			return false, false, fmt.Errorf("check %s OAuth credentials before removal: %w", openAIService, statusErr)
+		}
+		present = present || oauthPresent
+	}
+	return present, servicePresent, nil
+}
+
+func writeNamedServiceRemovalCandidate(out io.Writer, service, scope string) error {
+	writer := tabwriter.NewWriter(out, 0, 4, 3, ' ', 0)
+	if _, err := fmt.Fprintln(writer, "SCOPE\tSERVICE\tSECRET"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "%s\t%s\t\n", sanitizeTerminalText(scope), sanitizeTerminalText(service)); err != nil {
+		return err
+	}
+	return writer.Flush()
+}
+
+func serviceCredentialScopeLabel(scope sdk.SecretScope, sandboxName string) string {
+	if scope == sdk.SecretScopeSandbox {
+		return sandboxName
+	}
+	return globalScopeLabel
+}
+
+func (r *Runner) removeNamedOAuthCredential(ctx context.Context, client sdk.Client, service string) int {
+	removed, err := sdk.Accounts(client).Logout(ctx, service)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
 	if removed {
-		_, _ = fmt.Fprintf(r.Out, "Removed %s secret\n", fs.Arg(0))
+		_, _ = fmt.Fprintf(r.Out, "Removed %s OAuth credentials\n", service)
 	} else {
-		_, _ = fmt.Fprintf(r.Out, "No %s secret stored\n", fs.Arg(0))
+		_, _ = fmt.Fprintf(r.Out, "No %s OAuth credentials stored\n", service)
+	}
+	return 0
+}
+
+func (r *Runner) removeNamedServiceValue(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string) int {
+	removed, err := sdk.Secrets(client).Remove(ctx, service, scope, sandboxName)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if service == openAIService && scope == sdk.SecretScopeGlobal {
+		var code int
+		removed, code = r.removeOpenAIGlobalOAuth(ctx, client, service, removed)
+		if code != 0 {
+			return code
+		}
+	}
+	if removed {
+		_, _ = fmt.Fprintf(r.Out, "Removed %s credentials\n", sanitizeTerminalText(service))
+	} else {
+		_, _ = fmt.Fprintf(r.Out, "No %s credentials stored\n", sanitizeTerminalText(service))
+	}
+	return 0
+}
+
+func serviceCredentialPresent(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string) (bool, error) {
+	items, err := sdk.Secrets(client).List(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list service credentials before removal: %w", err)
+	}
+	for _, item := range items {
+		if item.Service == service && item.Scope == scope && item.SandboxName == sandboxName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *Runner) removeOpenAIGlobalOAuth(ctx context.Context, client sdk.Client, service string, apiKeyRemoved bool) (bool, int) {
+	oauthRemoved, err := sdk.Accounts(client).Logout(ctx, openAIService)
+	if err == nil {
+		return apiKeyRemoved || oauthRemoved, 0
+	}
+	if apiKeyRemoved {
+		_, _ = fmt.Fprintf(r.Err, "Removed %s API key, but OAuth credential removal failed: %v\n", service, err)
+	} else {
+		r.error(err)
+	}
+	return apiKeyRemoved, 1
+}
+
+func (r *Runner) serviceSecretRemoveInteractive(ctx context.Context, sandboxFilter string, globalOnly bool) int {
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	inventory, err := loadSecretRemovalInventory(ctx, client)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	choices := buildSecretRemovalChoices(inventory, sandboxFilter, globalOnly)
+	if len(choices) == 0 {
+		_, _ = fmt.Fprintln(r.Out, "No supported credentials stored")
+		return 0
+	}
+	screenFactory := r.SecretScreen
+	var screen tcell.Screen
+	if screenFactory == nil {
+		screen, err = tcell.NewScreen()
+		if err != nil {
+			r.error(fmt.Errorf("create credential selector: %w", err))
+			return 1
+		}
+	} else {
+		screen = screenFactory()
+	}
+	selected, err := selectSecretRemovalChoice(screen, choices)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if selected < 0 || selected >= len(choices) {
+		_, _ = fmt.Fprintln(r.Out, "Removal canceled")
+		return 0
+	}
+	choice := choices[selected]
+	return r.removeSecretChoice(ctx, client, choice)
+}
+
+func (r *Runner) removeSecretChoice(ctx context.Context, client sdk.Client, choice secretRemovalChoice) int {
+	switch {
+	case choice.service != "":
+		removed, err := sdk.Secrets(client).Remove(ctx, choice.service, choice.scope, choice.sandbox)
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if removed {
+			_, _ = fmt.Fprintf(r.Out, "Removed %s\n", choice.label)
+		}
+	case choice.registry != "":
+		response, err := client.RegistryCredentials().Logout(ctx, sdk.RegistryLogoutRequest{
+			Registry: choice.registry, Scope: choice.regScope, SandboxName: choice.sandbox,
+		})
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if response != nil && response.Removed {
+			_, _ = fmt.Fprintf(r.Out, "Removed %s\n", choice.label)
+		}
+	case choice.provider != "":
+		removed, err := sdk.Accounts(client).Logout(ctx, choice.provider)
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if removed {
+			_, _ = fmt.Fprintf(r.Out, "Removed %s\n", choice.label)
+		}
 	}
 	return 0
 }
@@ -172,6 +492,12 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 	fs.SetOutput(r.Err)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
 	jsonOutput := fs.Bool("json", false, "output in JSON format")
+	global := fs.Bool("global", false, "show only global secrets")
+	fs.BoolVar(global, "g", false, "show only global secrets")
+	sandbox := fs.String("sandbox", "", "show only secrets scoped to one sandbox")
+	service := fs.String("service", "", "filter by service name")
+	quiet := fs.Bool("quiet", false, "show only secret names")
+	fs.BoolVar(quiet, "q", false, "show only secret names")
 	if code, done := r.parseFlagsOrFail("secret ls", fs, args); done {
 		return code
 	}
@@ -212,6 +538,16 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 			out = append(out, serviceSecretOutput{Type: "registry", Service: item.Registry, Username: item.Username, Scope: item.Scope, SandboxName: item.SandboxName, State: "(stored)"})
 		}
 	}
+	out = filterSecretList(out, *global, *sandbox, *service)
+	if *quiet {
+		for _, item := range out {
+			if _, err := fmt.Fprintln(r.Out, item.Service); err != nil {
+				r.error(err)
+				return 1
+			}
+		}
+		return 0
+	}
 	switch selected {
 	case listFormatTable:
 		if len(out) == 0 {
@@ -223,7 +559,7 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		for _, item := range out {
 			sandbox := item.SandboxName
 			if sandbox == "" {
-				sandbox = "(global)"
+				sandbox = globalScopeLabel
 			}
 			username := item.Username
 			if username == "" {
@@ -253,4 +589,21 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		}
 		return 0
 	}
+}
+
+func filterSecretList(items []serviceSecretOutput, global bool, sandbox, service string) []serviceSecretOutput {
+	filtered := make([]serviceSecretOutput, 0, len(items))
+	for _, item := range items {
+		if global && item.Scope != string(sdk.SecretScopeGlobal) && item.Scope != string(sdk.RegistryScopeHostOnly) {
+			continue
+		}
+		if sandbox != "" && item.SandboxName != sandbox {
+			continue
+		}
+		if service != "" && !strings.EqualFold(item.Service, service) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }

@@ -1,52 +1,107 @@
 package command
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+	"golang.org/x/term"
 )
 
 var serviceEnvVars = map[string][]string{
-	"anthropic":  {"ANTHROPIC_API_KEY"},
-	"copilot":    {"COPILOT_API_KEY"},
-	"cursor":     {"CURSOR_API_KEY"},
-	"devin":      {"DEVIN_API_KEY"},
-	"droid":      {"DROID_API_KEY"},
-	"github":     {"GH_TOKEN", "GITHUB_TOKEN"},
-	"google":     {"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-	"groq":       {"GROQ_API_KEY"},
-	"mistral":    {"MISTRAL_API_KEY"},
-	"nebius":     {"NEBIUS_API_KEY"},
-	"openai":     {"OPENAI_API_KEY"},
-	"openrouter": {"OPENROUTER_API_KEY"},
-	"xai":        {"XAI_API_KEY"},
+	"anthropic":   {"ANTHROPIC_API_KEY"},
+	"copilot":     {"COPILOT_API_KEY"},
+	"cursor":      {"CURSOR_API_KEY"},
+	"devin":       {"DEVIN_API_KEY"},
+	"droid":       {"DROID_API_KEY"},
+	"github":      {"GH_TOKEN", "GITHUB_TOKEN"},
+	"google":      {"GOOGLE_API_KEY", "GEMINI_API_KEY"},
+	"groq":        {"GROQ_API_KEY"},
+	"mistral":     {"MISTRAL_API_KEY"},
+	"nebius":      {"NEBIUS_API_KEY"},
+	openAIService: {openAIAPIKeyEnv},
+	"openrouter":  {"OPENROUTER_API_KEY"},
+	"xai":         {"XAI_API_KEY"},
+}
+
+func (r *Runner) secretImportHelp() int {
+	const usage = `Description:
+  Copy supported host credential variables (such as OPENAI_API_KEY,
+  ANTHROPIC_API_KEY and GH_TOKEN) into the shared secret store. Sandboxes can
+  then use those saved credentials without exporting each variable per shell.
+
+  Detected variables are shown one at a time with a Y/n prompt and a preview
+  of the value's final four characters. Replacing a saved value is explicit:
+
+    - Interactive mode asks before replacing an existing value.
+    - --all adds new values without prompts and leaves existing ones intact.
+    - --force saves every detected value, replacing existing entries too.
+
+  A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.
+  --dry-run never writes and shows only a last-four-character preview.
+  Available services: anthropic, copilot, cursor, devin, droid, github, google,
+  groq, mistral, nebius, openai, openrouter, xai.
+
+Usage:
+  rsbx secret import [SERVICE] [flags]
+
+Examples:
+  # Walk every detected env var, prompting before each import
+  rsbx secret import
+
+  # Import only the github service
+  rsbx secret import github
+
+  # Non-interactive: import everything detected without prompting
+  rsbx secret import --all
+
+  # Overwrite an existing stored entry without confirmation
+  rsbx secret import github --force
+
+  # Preview what would be imported without writing
+  rsbx secret import --dry-run
+
+Flags:
+      --all       Import every detected env var without prompting
+      --dry-run   Show what would be imported without writing
+  -f, --force     Overwrite an existing stored entry without confirmation
+  -h, --help      Show this help
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
 }
 
 //nolint:gocognit,gocyclo,cyclop,funlen // interactive import intentionally handles each branch explicitly.
 func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, nil)
 	fs := flag.NewFlagSet("secret import", flag.ContinueOnError)
-	fs.SetOutput(r.Err)
+	fs.SetOutput(io.Discard)
 	all := fs.Bool("all", false, "import every detected variable without prompting")
 	force := fs.Bool("force", false, "overwrite existing secrets")
+	fs.BoolVar(force, "f", false, "overwrite existing secrets")
 	dryRun := fs.Bool("dry-run", false, "show what would be imported")
 	if code, done := r.parseFlagsOrFail("secret import", fs, args); done {
 		return code
 	}
 	if fs.NArg() > 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret import [SERVICE] [--all] [--force] [--dry-run]")
-		return 2
+		_, _ = fmt.Fprintf(r.Err, "error: accepts at most 1 arg(s), received %d\n  try: rsbx secret import --help\n", fs.NArg())
+		return 1
 	}
 	requested := ""
 	if fs.NArg() == 1 {
 		requested = strings.ToLower(fs.Arg(0))
 		if !validServiceSecret(requested) {
-			r.error(fmt.Errorf("unknown service %q", requested))
-			return 2
+			_, _ = fmt.Fprintf(r.Err, "error: unknown service %q (available: %s)\n  try: rsbx secret import --help\n", requested, strings.Join(serviceSecretNames, ", "))
+			return 1
 		}
 	}
 	client, err := r.client()
@@ -55,17 +110,35 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	secretStore := sdk.Secrets(client)
 	existing := make(map[string]bool)
 	if !*force {
-		if items, err := sdk.Secrets(client).List(ctx); err == nil {
-			for _, item := range items {
-				if item.Scope == sdk.SecretScopeGlobal {
-					existing[item.Service] = true
-				}
+		items, err := secretStore.List(ctx)
+		if err != nil {
+			r.error(fmt.Errorf("list stored secrets before import: %w", err))
+			return 1
+		}
+		for _, item := range items {
+			if item.Scope == sdk.SecretScopeGlobal {
+				existing[item.Service] = true
 			}
 		}
 	}
+	oauthPresent := false
+	if requested == "" || requested == openAIService {
+		if _, value := lookupServiceEnv(openAIService); value != "" {
+			present, err := sdk.AccountStatus(client).Status(ctx, openAIService)
+			if err != nil {
+				r.error(fmt.Errorf("check %s OAuth credentials before import: %w", openAIService, err))
+				return 1
+			}
+			oauthPresent = present
+		}
+	}
 	imported := 0
+	skipped := 0
+	detected := false
+	input := bufio.NewReader(r.In)
 	for _, service := range serviceSecretNames {
 		if requested != "" && service != requested {
 			continue
@@ -74,33 +147,66 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		if name == "" {
 			continue
 		}
-		if existing[service] && !*force {
-			_, _ = fmt.Fprintf(r.Err, "skip %s: already stored (use --force)\n", service)
+		detected = true
+		if service == openAIService && oauthPresent {
+			_, _ = fmt.Fprintf(r.Err, "skip %s: OAuth credentials are already stored and take precedence\n", service)
+			skipped++
 			continue
 		}
 		if *dryRun {
-			_, _ = fmt.Fprintf(r.Out, "would import %s from %s\n", service, name)
+			switch {
+			case existing[service] && *all && !*force:
+				_, _ = fmt.Fprintf(r.Out, "Would skip %s from %s: already stored (last 4: %s)\n", service, name, lastFourPreview(value))
+			case existing[service]:
+				_, _ = fmt.Fprintf(r.Out, "Would overwrite %s from %s (last 4: %s)\n", service, name, lastFourPreview(value))
+			default:
+				_, _ = fmt.Fprintf(r.Out, "Would import %s from %s (last 4: %s)\n", service, name, lastFourPreview(value))
+			}
 			continue
 		}
-		if !*all {
-			ok, err := r.confirmSecretImport(service, name, value)
+		if existing[service] && *all && !*force {
+			_, _ = fmt.Fprintf(r.Err, "skip %s: already stored (use --force to replace it)\n", service)
+			skipped++
+			continue
+		}
+		if !*all && !*force {
+			ok, err := r.confirmSecretImport(input, service, name, value, existing[service])
 			if err != nil {
 				r.error(err)
 				return 1
 			}
 			if !ok {
+				skipped++
 				continue
 			}
 		}
-		if _, err := sdk.Secrets(client).Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value)); err != nil {
+		var err error
+		if *force || existing[service] {
+			_, err = secretStore.Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
+		} else {
+			creator, ok := sdk.SecretCreation(client)
+			if !ok {
+				r.error(errors.New("create-only service-secret storage is not supported by this client; refusing a non-atomic write"))
+				return 1
+			}
+			_, err = creator.Create(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
+		}
+		if err != nil {
 			r.error(err)
 			return 1
 		}
 		imported++
 		_, _ = fmt.Fprintf(r.Out, "imported %s from %s\n", service, name)
 	}
-	if requested != "" && imported == 0 && !*dryRun {
-		_, _ = fmt.Fprintf(r.Err, "no environment variable found for %s\n", requested)
+	if detected && !*dryRun {
+		_, _ = fmt.Fprintf(r.Out, "  %d secrets imported · %d skipped\n", imported, skipped)
+	}
+	if !detected {
+		if requested != "" {
+			_, _ = fmt.Fprintf(r.Err, "No env var detected for %q on the host. Either the env var isn't set, or %q isn't a known credential service.\n", requested, requested)
+		} else {
+			_, _ = fmt.Fprintln(r.Err, "No credential env vars detected on the host. Set e.g. OPENAI_API_KEY in your shell and re-run, or use `rsbx secret set` to enter a value directly.")
+		}
 	}
 	return 0
 }
@@ -114,21 +220,42 @@ func lookupServiceEnv(service string) (string, string) {
 	return "", ""
 }
 
-func (r *Runner) confirmSecretImport(service, name, value string) (bool, error) {
-	preview := "****"
-	if len(value) >= 4 {
-		preview = "****" + value[len(value)-4:]
+func (r *Runner) confirmSecretImport(input *bufio.Reader, service, name, value string, overwrite bool) (bool, error) {
+	action := "Import"
+	if overwrite {
+		action = "Overwrite"
 	}
-	if _, err := fmt.Fprintf(r.Err, "Import %s from %s (%s)? [y/N] ", service, name, preview); err != nil {
+	if _, err := fmt.Fprintf(r.Err, "%s %s from %s (last 4: %s) into the global keychain? (Y/n) ", action, service, name, lastFourPreview(value)); err != nil {
 		return false, err
 	}
-	var answer string
-	if _, err := fmt.Fscanln(r.In, &answer); err != nil && !errors.Is(err, os.ErrClosed) {
-		if strings.Contains(err.Error(), "EOF") {
-			return false, nil
+	line, err := input.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	if !isTerminalReader(input) {
+		if _, writeErr := fmt.Fprintln(r.Err); writeErr != nil {
+			return false, writeErr
 		}
-		return false, err
 	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
+	if errors.Is(err, io.EOF) && line == "" {
+		return false, nil
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer == "" {
+		return true, nil
+	}
 	return answer == answerShortYes || answer == answerYes, nil
+}
+
+func isTerminalReader(input io.Reader) bool {
+	file, ok := input.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+func lastFourPreview(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 4 {
+		return strings.Repeat("•", len(runes))
+	}
+	return string(runes[len(runes)-4:])
 }
