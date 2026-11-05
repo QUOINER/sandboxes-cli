@@ -43,14 +43,17 @@ type serviceSecretOutput struct {
 }
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "-t": true, "--ref": true, "--command": true, forceFlag: false, "-f": false, oauthFlag: false})
+	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "-t": true, "--ref": true, "--command": true, "--refresh": true, forceFlag: false, "-f": false, oauthFlag: false, "--no-verify": false, "--show-error": false})
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
 	token := fs.String("token", "", "secret value (less secure: visible in shell history)")
 	fs.StringVar(token, "t", "", "secret value (less secure: visible in shell history)")
-	ref := fs.String("ref", "", "secret reference (not implemented)")
-	command := fs.String("command", "", "secret command (not implemented)")
+	ref := fs.String("ref", "", "use a 1Password op:// reference or AWS Secrets Manager ARN")
+	command := fs.String("command", "", "run a host shell command to resolve the secret; it can access host files")
+	refresh := fs.String("refresh", "", "source refresh policy: on-demand or a duration (default: 55m)")
+	noVerify := fs.Bool("no-verify", false, "store the source without resolving it now")
+	showError := fs.Bool("show-error", false, "show provider stderr on initial verification failure (may contain secrets)")
 	oauth := fs.Bool("oauth", false, "sign in to the OpenAI account on the host")
 	force := fs.Bool("force", false, "overwrite an existing secret when --token is used")
 	fs.BoolVar(force, "f", false, "overwrite an existing secret when --token is used")
@@ -90,14 +93,94 @@ func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
 		r.error(fmt.Errorf("unknown service %q; use one of: %s", service, strings.Join(serviceSecretNames, ", ")))
 		return 2
 	}
-	if *oauth {
-		return r.serviceSecretOAuthSet(ctx, service, *sandboxName, *token, *ref, *command)
-	}
-	if *ref != "" || *command != "" {
-		r.error(errors.New("--ref and --command are not implemented by the local broker"))
+	return r.finishServiceSecretSet(ctx, service, *sandboxName, *token, *ref, *command, *refresh, *noVerify, *showError, *oauth, *force, flagWasProvided(fs, "ref"), flagWasProvided(fs, "command"))
+}
+
+func flagWasProvided(fs *flag.FlagSet, name string) bool {
+	provided := false
+	fs.Visit(func(value *flag.Flag) {
+		if value.Name == name {
+			provided = true
+		}
+	})
+	return provided
+}
+
+func (r *Runner) finishServiceSecretSet(ctx context.Context, service, sandboxName, token, ref, command, refresh string, noVerify, showError, oauth, force, refProvided, commandProvided bool) int {
+	if refProvided && ref == "" || commandProvided && command == "" {
+		r.error(errors.New("--ref and --command require a non-empty value"))
 		return 2
 	}
-	return r.storeServiceSecret(ctx, service, *sandboxName, *token, *force)
+	if oauth {
+		return r.storeOAuthServiceSecret(ctx, service, sandboxName, token, ref, command, refresh, noVerify, showError)
+	}
+	if ref != "" || command != "" {
+		return r.storeServiceSecretSource(ctx, service, sandboxName, token, ref, command, refresh, noVerify, showError, force)
+	}
+	if refresh != "" || noVerify || showError {
+		r.error(errors.New("--refresh, --no-verify, and --show-error require --ref or --command"))
+		return 2
+	}
+	return r.storeServiceSecret(ctx, service, sandboxName, token, force)
+}
+
+func (r *Runner) storeOAuthServiceSecret(ctx context.Context, service, sandboxName, token, ref, command, refresh string, noVerify, showError bool) int {
+	if ref != "" || command != "" || refresh != "" || noVerify || showError {
+		r.error(errors.New("--oauth cannot be combined with dynamic secret source flags"))
+		return 2
+	}
+	return r.serviceSecretOAuthSet(ctx, service, sandboxName, token, ref, command)
+}
+
+func (r *Runner) storeServiceSecretSource(ctx context.Context, service, sandboxName, token, reference, command, refresh string, noVerify, showError, force bool) int {
+	if reference != "" && command != "" {
+		r.error(errors.New("--ref and --command cannot be combined"))
+		return 2
+	}
+	if token != "" {
+		r.error(errors.New("--ref and --command cannot be combined with --token"))
+		return 2
+	}
+	if noVerify && showError {
+		r.error(errors.New("--show-error cannot be combined with --no-verify"))
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	creator, ok := sdk.SecretSources(client)
+	if !ok {
+		r.error(errors.New("dynamic secret sources are not supported by this daemon"))
+		return 1
+	}
+	scope := sdk.SecretScopeGlobal
+	if sandboxName != "" {
+		scope = sdk.SecretScopeSandbox
+	}
+	opAccount, awsProfile := "", ""
+	if strings.HasPrefix(reference, "op://") {
+		opAccount = os.Getenv("OP_ACCOUNT")
+	}
+	if strings.HasPrefix(reference, "arn:") {
+		awsProfile = os.Getenv("AWS_PROFILE")
+	}
+	summary, err := creator.SetSource(ctx, service, scope, sandboxName, sdk.SecretSource{
+		Reference: reference, Command: command, Refresh: refresh, NoVerify: noVerify, ShowError: showError,
+		OPAccount: opAccount, AWSProfile: awsProfile,
+	}, force)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	displayScope := string(summary.Scope)
+	if summary.SandboxName != "" {
+		displayScope += " " + summary.SandboxName
+	}
+	_, _ = fmt.Fprintf(r.Out, "Stored %s secret source (%s) in host keychain\n", summary.Service, displayScope)
+	return 0
 }
 
 func (r *Runner) selectServiceSecret() (string, error) {

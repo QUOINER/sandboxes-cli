@@ -211,6 +211,29 @@ that lack this RPC fail closed with `Unimplemented`.
 Omit the service name in an interactive terminal to choose from the supported
 providers; noninteractive callers must name the service explicitly.
 
+Service secrets can also use a host-side dynamic source:
+
+```sh
+rsbx secret set anthropic --ref 'op://Work/Anthropic/credential'
+rsbx secret set openai --ref 'arn:aws:secretsmanager:us-west-2:123456789012:secret:openai-api-key' --refresh 30m
+rsbx secret set github --command 'gh auth token' --refresh on-demand
+```
+
+The authenticated `op` or `aws` CLI must be available to the daemon on the
+host. Rheic stores the reference or command in the host credential vault and
+resolves it only while the host proxy needs the credential; the guest receives
+only the existing proxy placeholder. Commands run through the host shell from a
+fresh temporary directory, with a 30-second deadline, bounded output and
+process-tree cleanup. They execute with the daemon user's host privileges and
+are not confined from reading host files; use only commands you trust, and
+keep helper files and the host temp directory outside writable sandbox mounts.
+The daemon uses an environment allowlist; `OP_ACCOUNT` and `AWS_PROFILE` are
+captured when the source is registered. The default cache duration is 55 minutes;
+`--refresh on-demand` resolves for each proxied credential use. `--no-verify`
+stores a source without resolving it during setup. `--show-error` can expose
+provider stderr during initial verification and may print sensitive information.
+Custom-secret placeholders remain unsupported.
+
 Registry credentials previously managed with `rsbx login --registry` and
 `rsbx logout --registry` are now managed with `rsbx secret set --registry`,
 `rsbx secret ls` and `rsbx secret rm --registry`; existing keychain entries do

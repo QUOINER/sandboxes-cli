@@ -27,6 +27,20 @@ type fakeServiceSecrets struct {
 	removeCount int
 }
 
+type fakeDynamicServiceSecrets struct {
+	*fakeServiceSecrets
+	source      sdk.SecretSource
+	overwrite   bool
+	sourceCalls int
+}
+
+func (f *fakeDynamicServiceSecrets) SetSource(_ context.Context, service string, scope sdk.SecretScope, sandboxName string, source sdk.SecretSource, overwrite bool) (sdk.ServiceSecret, error) {
+	f.source = source
+	f.overwrite = overwrite
+	f.sourceCalls++
+	return sdk.ServiceSecret{Service: service, Scope: scope, SandboxName: sandboxName}, nil
+}
+
 type recordingAccounts struct {
 	loggedOut []string
 	removed   bool
@@ -81,6 +95,77 @@ func TestSecretSetTokenShortFlag(t *testing.T) {
 	}
 	if secrets.service != "github" || string(secrets.value) != "synthetic-token" {
 		t.Fatalf("stored service=%q value=%q", secrets.service, secrets.value)
+	}
+}
+
+func TestSecretSetDynamicSourcesAndProviderSelection(t *testing.T) {
+	t.Setenv("OP_ACCOUNT", "synthetic-account")
+	t.Setenv("AWS_PROFILE", "synthetic-profile")
+	for _, test := range []struct {
+		name string
+		args []string
+		want sdk.SecretSource
+	}{
+		{
+			name: "1Password reference snapshots account",
+			args: []string{"secret", "set", "anthropic", "--ref", "op://Work/Anthropic/key"},
+			want: sdk.SecretSource{Reference: "op://Work/Anthropic/key", OPAccount: "synthetic-account"},
+		},
+		{
+			name: "AWS reference snapshots profile",
+			args: []string{"secret", "set", "openai", "--ref", "arn:aws:secretsmanager:us-west-2:123456789012:secret:synthetic", "--refresh", "on-demand"},
+			want: sdk.SecretSource{Reference: "arn:aws:secretsmanager:us-west-2:123456789012:secret:synthetic", Refresh: "on-demand", AWSProfile: "synthetic-profile"},
+		},
+		{
+			name: "host command does not capture unrelated provider selectors",
+			args: []string{"secret", "set", "github", "--command", "gh auth token", "--no-verify"},
+			want: sdk.SecretSource{Command: "gh auth token", NoVerify: true},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			secrets := &fakeDynamicServiceSecrets{fakeServiceSecrets: &fakeServiceSecrets{}}
+			client := fakeClient{secrets: secrets}
+			var out bytes.Buffer
+			runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+			if code := runner.Run(context.Background(), test.args); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, out.String())
+			}
+			if secrets.sourceCalls != 1 || secrets.overwrite || secrets.source != test.want {
+				t.Fatalf("source calls=%d overwrite=%v source=%+v want=%+v", secrets.sourceCalls, secrets.overwrite, secrets.source, test.want)
+			}
+			if strings.Contains(out.String(), "gh auth token") || strings.Contains(out.String(), "synthetic-account") || strings.Contains(out.String(), "synthetic-profile") {
+				t.Fatalf("CLI output disclosed source metadata: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestSecretSetHelpDescribesHostCommandTrustBoundary(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out}
+	if code := runner.Run(context.Background(), []string{"secret", "set", "--help"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if !strings.Contains(out.String(), "host shell command") || !strings.Contains(out.String(), "access host files") {
+		t.Fatalf("dynamic command help omits host execution warning: %q", out.String())
+	}
+}
+
+func TestSecretSetRejectsConflictingOrEmptyDynamicSourcesBeforeDaemonAccess(t *testing.T) {
+	for _, args := range [][]string{
+		{"secret", "set", "github", "--ref", "op://Work/GitHub/key", "--command", "gh auth token"},
+		{"secret", "set", "github", "--ref", "op://Work/GitHub/key", "--token", "synthetic-token"},
+		{"secret", "set", "github", "--ref", ""},
+		{"secret", "set", "github", "--command", ""},
+	} {
+		var out bytes.Buffer
+		runner := &Runner{Out: &out, Err: &out}
+		if code := runner.Run(context.Background(), args); code != 2 {
+			t.Fatalf("args=%q exit=%d output=%q want=2", args, code, out.String())
+		}
+		if strings.Contains(out.String(), "synthetic-token") {
+			t.Fatalf("diagnostic disclosed token: %q", out.String())
+		}
 	}
 }
 

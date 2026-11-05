@@ -413,7 +413,7 @@ func TestSecretSetHelpDocumentsInteractiveServiceChoiceAndLimits(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"secret", "set", "--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string      Secret reference (not implemented)", "--command string  Secret command (not implemented)"} {
+	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string      Use a 1Password op:// reference or AWS Secrets Manager ARN", "--command string  Run a host shell command to resolve a secret (can access host files)", "--refresh string", "--no-verify", "--show-error", "Registry credentials", "--registry string", "--password-stdin", "Cross-host registry authentication endpoints are not supported yet."} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("help lacks %q: %s", expected, out.String())
 		}
