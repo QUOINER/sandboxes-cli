@@ -219,21 +219,37 @@ func convertOAuthCredentials(credentials []kit.Credential) ([]sdk.OAuthCredentia
 		if credential.Service == "openai" {
 			continue
 		}
-		structure := ""
-		if len(oauth.CredentialFile.Structure) > 0 {
-			encoded, err := json.Marshal(oauth.CredentialFile.Structure)
-			if err != nil {
-				return nil, fmt.Errorf("encode kit OAuth credential structure: %w", err)
-			}
-			structure = string(encoded)
+		var tokenEndpoint *sdk.OAuthTokenEndpoint
+		if oauth.TokenEndpoint != nil {
+			tokenEndpoint = &sdk.OAuthTokenEndpoint{Host: oauth.TokenEndpoint.Host, Path: oauth.TokenEndpoint.Path}
 		}
-		fields := oauth.ResponseFields
+		var sentinels *sdk.OAuthSentinels
+		if oauth.Sentinels != nil {
+			sentinels = &sdk.OAuthSentinels{AccessToken: oauth.Sentinels.AccessToken, RefreshToken: oauth.Sentinels.RefreshToken}
+		}
+		var credentialFile *sdk.OAuthCredentialFile
+		if oauth.CredentialFile != nil {
+			structure := ""
+			if len(oauth.CredentialFile.Structure) > 0 {
+				encoded, err := json.Marshal(oauth.CredentialFile.Structure)
+				if err != nil {
+					return nil, fmt.Errorf("encode kit OAuth credential structure: %w", err)
+				}
+				structure = string(encoded)
+			}
+			credentialFile = &sdk.OAuthCredentialFile{Path: oauth.CredentialFile.Path, StructureJSON: structure, Template: oauth.CredentialFile.Template}
+		}
+		var responseFields *sdk.OAuthResponseFields
+		if oauth.ResponseFields != nil {
+			fields := oauth.ResponseFields
+			responseFields = &sdk.OAuthResponseFields{AccessToken: fields.AccessToken, RefreshToken: fields.RefreshToken, ExpiresIn: fields.ExpiresIn, Scope: fields.Scope, IDToken: fields.IDToken}
+		}
 		converted = append(converted, sdk.OAuthCredential{Service: credential.Service,
-			TokenEndpoint:  sdk.OAuthTokenEndpoint{Host: oauth.TokenEndpoint.Host, Path: oauth.TokenEndpoint.Path},
+			TokenEndpoint:  tokenEndpoint,
 			ResourceHosts:  append([]string(nil), oauth.ResourceHosts...),
-			Sentinels:      sdk.OAuthSentinels{AccessToken: oauth.Sentinels.AccessToken, RefreshToken: oauth.Sentinels.RefreshToken},
-			CredentialFile: sdk.OAuthCredentialFile{Path: oauth.CredentialFile.Path, StructureJSON: structure, Template: oauth.CredentialFile.Template},
-			ResponseFields: sdk.OAuthResponseFields{AccessToken: fields.AccessToken, RefreshToken: fields.RefreshToken, ExpiresIn: fields.ExpiresIn, Scope: fields.Scope, IDToken: fields.IDToken},
+			Sentinels:      sentinels,
+			CredentialFile: credentialFile,
+			ResponseFields: responseFields,
 			Passthrough:    oauth.Passthrough, SkipIfEnv: append([]string(nil), oauth.SkipIfEnv...)})
 	}
 	return converted, nil

@@ -90,7 +90,7 @@ spec:
 		t.Fatal(err)
 	}
 	credential := doc.Spec.Credentials[0]
-	if credential.Service != "fixture" || credential.OAuth.TokenEndpoint.Host != "auth.example.test" || credential.OAuth.CredentialFile.Path != "~/.fixture/credentials.json" || credential.OAuth.ResponseFields.AccessToken != "access_token" {
+	if credential.Service != "fixture" || credential.OAuth.TokenEndpoint == nil || credential.OAuth.TokenEndpoint.Host != "auth.example.test" || credential.OAuth.CredentialFile == nil || credential.OAuth.CredentialFile.Path != "~/.fixture/credentials.json" || credential.OAuth.ResponseFields == nil || credential.OAuth.ResponseFields.AccessToken != "access_token" {
 		t.Fatalf("decoded OAuth credential=%+v", credential)
 	}
 	if got := doc.OAuthEnvironment(); len(got) != 0 {
@@ -117,6 +117,21 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {ho
 	}
 }
 
+func TestDecodePassthroughOAuthLeavesSentinelsAbsent(t *testing.T) {
+	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+kind: Kit
+metadata: {name: passthrough}
+spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /token}, passthrough: true}}]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := doc.Spec.Credentials[0].OAuth
+	if credential.Sentinels != nil {
+		t.Fatalf("omitted passthrough sentinels were materialized: %+v", credential.Sentinels)
+	}
+}
+
 func TestDecodeDockerV2OAuthKit(t *testing.T) {
 	doc, err := Decode(strings.NewReader(`schemaVersion: "2"
 kind: sandbox
@@ -138,7 +153,7 @@ credentials:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Metadata.Name != "fixture" || doc.Spec.Image != "ubuntu:latest" || doc.Spec.Credentials[0].OAuth.Sentinels.AccessToken != "ACCESS_SENTINEL" {
+	if doc.Metadata.Name != "fixture" || doc.Spec.Image != "ubuntu:latest" || doc.Spec.Credentials[0].OAuth.Sentinels == nil || doc.Spec.Credentials[0].OAuth.Sentinels.AccessToken != "ACCESS_SENTINEL" {
 		t.Fatalf("Docker v2 kit was not mapped: %+v", doc)
 	}
 	for _, body := range []string{

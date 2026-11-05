@@ -59,13 +59,13 @@ type Credential struct {
 // OAuthCredential declares one fixed resource-host broker route. The daemon
 // owns provider endpoints and token handling; kits cannot override them.
 type OAuthCredential struct {
-	TokenEndpoint  TokenEndpoint  `yaml:"tokenEndpoint"`
-	ResourceHosts  []string       `yaml:"resourceHosts"`
-	Sentinels      Sentinels      `yaml:"sentinels"`
-	CredentialFile CredentialFile `yaml:"credentialFile"`
-	ResponseFields ResponseFields `yaml:"responseFields"`
-	Passthrough    bool           `yaml:"passthrough"`
-	SkipIfEnv      []string       `yaml:"skipIfEnv"`
+	TokenEndpoint  *TokenEndpoint  `yaml:"tokenEndpoint"`
+	ResourceHosts  []string        `yaml:"resourceHosts"`
+	Sentinels      *Sentinels      `yaml:"sentinels"`
+	CredentialFile *CredentialFile `yaml:"credentialFile"`
+	ResponseFields *ResponseFields `yaml:"responseFields"`
+	Passthrough    bool            `yaml:"passthrough"`
+	SkipIfEnv      []string        `yaml:"skipIfEnv"`
 }
 
 type Sentinels struct {
@@ -258,30 +258,36 @@ func validateFixedOpenAIOAuth(oauth *OAuthCredential) error {
 	if len(oauth.ResourceHosts) != 0 && (len(oauth.ResourceHosts) != 1 || oauth.ResourceHosts[0] != "api.openai.com") {
 		return errors.New("openai OAuth resourceHosts must contain only api.openai.com")
 	}
-	if oauth.TokenEndpoint != (TokenEndpoint{}) || oauth.Sentinels != (Sentinels{}) ||
-		oauth.CredentialFile.Path != "" || oauth.CredentialFile.Template != "" || len(oauth.CredentialFile.Structure) != 0 ||
-		oauth.ResponseFields != (ResponseFields{}) || oauth.Passthrough {
+	if oauth.TokenEndpoint != nil || oauth.Sentinels != nil || oauth.CredentialFile != nil ||
+		oauth.ResponseFields != nil || oauth.Passthrough {
 		return errors.New("openai OAuth kit uses a fixed daemon-managed provider; custom broker fields are unsupported")
 	}
 	return nil
 }
 
 func validateOAuthCredential(service string, oauth *OAuthCredential) error {
-	if !validOAuthHost(oauth.TokenEndpoint.Host) || !strings.HasPrefix(oauth.TokenEndpoint.Path, "/") || pathpkg.Clean(oauth.TokenEndpoint.Path) != oauth.TokenEndpoint.Path || strings.ContainsAny(oauth.TokenEndpoint.Path, "?#\r\n") {
+	if oauth.TokenEndpoint == nil || !validOAuthHost(oauth.TokenEndpoint.Host) || !strings.HasPrefix(oauth.TokenEndpoint.Path, "/") || pathpkg.Clean(oauth.TokenEndpoint.Path) != oauth.TokenEndpoint.Path || strings.ContainsAny(oauth.TokenEndpoint.Path, "?#\r\n") {
 		return fmt.Errorf("kit OAuth credential %q requires a valid tokenEndpoint", service)
 	}
-	if !oauth.Passthrough && (oauth.Sentinels.AccessToken == "" || oauth.Sentinels.RefreshToken == "" || oauth.Sentinels.AccessToken == oauth.Sentinels.RefreshToken) {
+	if !oauth.Passthrough && (oauth.Sentinels == nil || oauth.Sentinels.AccessToken == "" || oauth.Sentinels.RefreshToken == "" || oauth.Sentinels.AccessToken == oauth.Sentinels.RefreshToken) {
 		return fmt.Errorf("kit OAuth credential %q requires distinct sentinels unless passthrough is enabled", service)
 	}
 	if err := validateOAuthHosts(service, oauth); err != nil {
 		return err
 	}
-	return validateCredentialFile(service, oauth.CredentialFile)
+	if oauth.CredentialFile == nil {
+		return nil
+	}
+	return validateCredentialFile(service, *oauth.CredentialFile)
 }
 
 func validateOAuthHosts(service string, oauth *OAuthCredential) error {
 	seenHosts := map[string]struct{}{}
-	for _, host := range append(append([]string(nil), oauth.ResourceHosts...), oauth.TokenEndpoint.Host) {
+	hosts := append([]string(nil), oauth.ResourceHosts...)
+	if oauth.TokenEndpoint != nil {
+		hosts = append(hosts, oauth.TokenEndpoint.Host)
+	}
+	for _, host := range hosts {
 		if !validOAuthHost(host) {
 			return fmt.Errorf("kit OAuth credential %q contains an invalid host", service)
 		}
