@@ -68,6 +68,19 @@ func TestSecretSetOAuthWithoutServiceUsesOpenAIProvider(t *testing.T) {
 	}
 }
 
+func TestSecretSetTokenShortFlag(t *testing.T) {
+	secrets := &fakeServiceSecrets{}
+	client := fakeClient{secrets: secrets}
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+	if code := runner.Run(context.Background(), []string{"secret", "set", "github", "-t", "synthetic-token"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if secrets.service != "github" || string(secrets.value) != "synthetic-token" {
+		t.Fatalf("stored service=%q value=%q", secrets.service, secrets.value)
+	}
+}
+
 func TestSecretRemoveSandboxOpenAIDoesNotRemoveGlobalOAuth(t *testing.T) {
 	secrets := &fakeServiceSecrets{}
 	accounts := &recordingAccounts{removed: true}

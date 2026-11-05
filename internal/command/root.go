@@ -507,11 +507,11 @@ Examples:
   rsbx secret set github
   rsbx secret set openai --sandbox my-sandbox
   rsbx secret set openai --oauth
-  rsbx secret set --token VALUE
+  rsbx secret set github -t VALUE
 
 Flags:
       --sandbox string  Scope the secret to one sandbox
-      --token string    Secret value (less secure: visible in shell history)
+  -t, --token string   Secret value (less secure: visible in shell history)
       --oauth           Sign in to the global OpenAI account on the host
       --ref string      Secret reference (not implemented)
       --command string  Secret command (not implemented)

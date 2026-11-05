@@ -39,11 +39,12 @@ type serviceSecretOutput struct {
 }
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "--ref": true, "--command": true, "--force": false, "-f": false, oauthFlag: false})
+	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "-t": true, "--ref": true, "--command": true, "--force": false, "-f": false, oauthFlag: false})
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
 	token := fs.String("token", "", "secret value (less secure: visible in shell history)")
+	fs.StringVar(token, "t", "", "secret value (less secure: visible in shell history)")
 	ref := fs.String("ref", "", "secret reference (not implemented)")
 	command := fs.String("command", "", "secret command (not implemented)")
 	oauth := fs.Bool("oauth", false, "sign in to the OpenAI account on the host")

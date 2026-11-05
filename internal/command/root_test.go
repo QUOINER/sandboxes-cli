@@ -243,7 +243,7 @@ func TestSecretSetHelpDocumentsInteractiveServiceChoiceAndLimits(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"secret", "set", "--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "--force", "--ref string      Secret reference (not implemented)", "--command string  Secret command (not implemented)"} {
+	for _, expected := range []string{"[SERVICE]", "arrow keys", "anthropic", "openai", "-t, --token string", "--force", "--ref string      Secret reference (not implemented)", "--command string  Secret command (not implemented)"} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("help lacks %q: %s", expected, out.String())
 		}
