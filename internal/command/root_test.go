@@ -250,6 +250,27 @@ func TestSecretSetHelpDocumentsInteractiveServiceChoiceAndLimits(t *testing.T) {
 	}
 }
 
+func TestRootHelpListsSupportedAndUnsupportedDockerCommandFamilies(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out}
+	if code := runner.Run(context.Background(), []string{"--help"}); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	for _, expected := range []string{"Sandbox commands:", "Management commands:", "Extensions:", "reset", "template", "Unsupported Docker Sandboxes commands:", "agents", "volume", "--socket PATH"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("root help lacks %q: %s", expected, out.String())
+		}
+	}
+}
+
+func TestAgentManagementCommandFailsExplicitly(t *testing.T) {
+	var out bytes.Buffer
+	runner := &Runner{Out: &out, Err: &out}
+	if code := runner.Run(context.Background(), []string{"agents"}); code != 1 || !strings.Contains(out.String(), "agents: unsupported") {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+}
+
 func TestSecretRemovalRequiresForceOutsideInteractiveTerminal(t *testing.T) {
 	for _, args := range [][]string{{"secret", "rm", "openai"}, {"secret", "rm", "--registry", "ghcr.io"}} {
 		var out bytes.Buffer

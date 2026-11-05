@@ -24,7 +24,7 @@ func TestHelpDoesNotReturnEmptyUsage(t *testing.T) {
 		if strings.TrimSpace(out.String()) == "" {
 			t.Fatalf("%v produced empty help", args)
 		}
-		if !strings.Contains(out.String(), "usage:") {
+		if !strings.Contains(out.String(), "usage:") && !strings.Contains(out.String(), "Usage:") {
 			t.Fatalf("%v output=%q", args, out.String())
 		}
 	}
@@ -36,7 +36,7 @@ func TestRootHelpListsCommandsAndSocket(t *testing.T) {
 	if code := runner.Run(context.Background(), []string{"--help"}); code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
-	for _, want := range []string{"commands:", "run", "create", "--socket"} {
+	for _, want := range []string{"Sandbox commands:", "run", "create", "--socket"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help missing %q: %q", want, out.String())
 		}

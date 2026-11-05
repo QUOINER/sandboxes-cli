@@ -32,6 +32,7 @@ const (
 	commandInspect    = "inspect"
 	commandReset      = "reset"
 	stateUnavailable  = "unavailable"
+	commandAgents     = "agents"
 	commandList       = "list"
 	commandDelete     = "delete"
 	commandRemove     = "remove"
@@ -209,7 +210,7 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.reset(ctx, args), true
 	case "tui":
 		return r.tui(ctx, args), true
-	case "volume", "env", "mcp", "move", "ttl", "setup", "skills":
+	case commandAgents, "volume", "env", "mcp", "move", "ttl", "setup", "skills":
 		return r.unsupportedFamily(name), true
 	case completionCommand:
 		return r.completion(args), true
@@ -728,13 +729,14 @@ func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 
 func (r *Runner) unsupportedFamily(name string) int {
 	reasons := map[string]string{
-		"volume": "persistent volumes are cloud-only in this build",
-		"env":    "declarative sbxenv files are not implemented",
-		"mcp":    "the MCP gateway is not implemented",
-		"move":   "cloud move is unavailable without a tenant",
-		"ttl":    "cloud TTL is unavailable without a tenant",
-		"setup":  "host setup is not implemented",
-		"skills": "skills management is not implemented",
+		commandAgents: "agent management commands are not implemented; use run with a supported agent",
+		"volume":      "persistent volumes are cloud-only in this build",
+		"env":         "declarative sbxenv files are not implemented",
+		"mcp":         "the MCP gateway is not implemented",
+		"move":        "cloud move is unavailable without a tenant",
+		"ttl":         "cloud TTL is unavailable without a tenant",
+		"setup":       "host setup is not implemented",
+		"skills":      "skills management is not implemented",
 	}
 	_, _ = fmt.Fprintf(r.Err, "rsbx %s: unsupported: %s\n", name, reasons[name])
 	return 1
@@ -1588,10 +1590,33 @@ func (r *Runner) printSandbox(sb *sdk.Sandbox) {
 }
 
 func (r *Runner) usage() {
-	_, _ = fmt.Fprintln(r.Out, "usage: rsbx [--socket PATH] <command>")
-	_, _ = fmt.Fprintln(r.Out, "commands: run, attach, create, exec, cp, ls, get, ports, policy, settings, kit, tui, daemon, start, stop, rm, prune, diagnose, wait, login, logout, secret, completion, version, help")
-	_, _ = fmt.Fprintln(r.Out, "global flags: --socket PATH  local daemon endpoint")
-	_, _ = fmt.Fprintln(r.Out, `Use "rsbx <command> --help" for command details.`)
+	const help = `Rheic Sandboxes manages isolated local environments for coding agents.
+
+Usage:
+  rsbx COMMAND
+
+Sandbox commands:
+  run, attach, create, exec, cp, ls, get, start, stop, rm, prune, wait, ports
+
+Management commands:
+  daemon, diagnose, login, logout, policy, reset, secret, settings, tui
+
+Extensions:
+  kit       Inspect local kit files; registry kits and builders are unavailable
+  template  List and inspect built-in templates
+
+Unsupported Docker Sandboxes commands:
+  agents, env, mcp, move, setup, skills, ttl, volume
+
+Flags:
+      --socket PATH  Local daemon endpoint
+  -h, --help         Show command help
+
+Use "rsbx COMMAND --help" for command details.
+`
+	if _, err := io.WriteString(r.Out, help); err != nil {
+		r.error(err)
+	}
 }
 
 func (r *Runner) error(err error) {
