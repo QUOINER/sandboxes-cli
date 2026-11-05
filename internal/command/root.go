@@ -864,7 +864,7 @@ func (r *Runner) confirmSecretRemoval(target string, force bool) (bool, int) {
 		_, _ = fmt.Fprintln(r.Err, "error: stdin is not a terminal; use --force to skip confirmation")
 		return false, 1
 	}
-	if _, err := fmt.Fprintf(r.Err, "Remove %s? [y/N] ", target); err != nil {
+	if _, err := fmt.Fprintf(r.Err, "Remove %s? [y/N] ", sanitizeTerminalText(target)); err != nil {
 		r.error(err)
 		return false, 1
 	}
@@ -1021,7 +1021,7 @@ func (r *Runner) removeRegistryScopes(ctx context.Context, client sdk.Client, re
 		if response.Removed {
 			status = "Removed registry credentials"
 		}
-		_, _ = fmt.Fprintf(r.Out, "%s for %s (%s)\n", status, registry, scope)
+		_, _ = fmt.Fprintf(r.Out, "%s for %s (%s)\n", status, sanitizeTerminalText(registry), scope)
 	}
 	return 0
 }

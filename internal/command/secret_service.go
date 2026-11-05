@@ -331,7 +331,7 @@ func writeNamedServiceRemovalCandidate(out io.Writer, service, scope string) err
 	if _, err := fmt.Fprintln(writer, "SCOPE\tSERVICE\tSECRET"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "%s\t%s\t\n", scope, service); err != nil {
+	if _, err := fmt.Fprintf(writer, "%s\t%s\t\n", sanitizeTerminalText(scope), sanitizeTerminalText(service)); err != nil {
 		return err
 	}
 	return writer.Flush()
@@ -372,9 +372,9 @@ func (r *Runner) removeNamedServiceValue(ctx context.Context, client sdk.Client,
 		}
 	}
 	if removed {
-		_, _ = fmt.Fprintf(r.Out, "Removed %s credentials\n", service)
+		_, _ = fmt.Fprintf(r.Out, "Removed %s credentials\n", sanitizeTerminalText(service))
 	} else {
-		_, _ = fmt.Fprintf(r.Out, "No %s credentials stored\n", service)
+		_, _ = fmt.Fprintf(r.Out, "No %s credentials stored\n", sanitizeTerminalText(service))
 	}
 	return 0
 }

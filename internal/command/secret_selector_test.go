@@ -71,6 +71,16 @@ func TestSecretSelectorSanitizesTerminalControlAndDirectionOverrides(t *testing.
 	}
 }
 
+func TestNamedServiceRemovalTableSanitizesTerminalControls(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeNamedServiceRemovalCandidate(&output, "ghcr\x1b[31m.io", "sandbox\x1b[2J"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "\x1b") || !strings.Contains(output.String(), "sandbox�[2J") || !strings.Contains(output.String(), "ghcr�[31m.io") {
+		t.Fatalf("unsafe or unexpected removal table: %q", output.String())
+	}
+}
+
 func TestSecretSelectionArrowEnterAndCancelEvents(t *testing.T) {
 	selected := 0
 	selected, done, accept := updateSecretSelection(tcell.NewEventKey(tcell.KeyDown, "", tcell.ModNone), selected, 2)
