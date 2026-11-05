@@ -138,7 +138,12 @@ func (r *Runner) storeServiceSecret(ctx context.Context, service, sandboxName, t
 	if force {
 		summary, err = secrets.Set(ctx, service, scope, sandboxName, value)
 	} else {
-		summary, err = secrets.Create(ctx, service, scope, sandboxName, value)
+		creator, ok := sdk.SecretCreation(client)
+		if !ok {
+			r.error(errors.New("create-only service-secret storage is not supported by this client; refusing a non-atomic write"))
+			return 1
+		}
+		summary, err = creator.Create(ctx, service, scope, sandboxName, value)
 	}
 	if err != nil {
 		r.error(err)

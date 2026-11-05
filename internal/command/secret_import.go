@@ -184,7 +184,12 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 		if *force || existing[service] {
 			_, err = secretStore.Set(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
 		} else {
-			_, err = secretStore.Create(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
+			creator, ok := sdk.SecretCreation(client)
+			if !ok {
+				r.error(errors.New("create-only service-secret storage is not supported by this client; refusing a non-atomic write"))
+				return 1
+			}
+			_, err = creator.Create(ctx, service, sdk.SecretScopeGlobal, "", []byte(value))
 		}
 		if err != nil {
 			r.error(err)
