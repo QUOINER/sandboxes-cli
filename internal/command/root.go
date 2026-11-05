@@ -502,7 +502,11 @@ func (r *Runner) secretRemoveCommand(ctx context.Context, args []string) int {
 	if hasFlag(args, "--all") {
 		return r.serviceSecretRemoveAll(ctx, args)
 	}
-	if hasFlag(args, "--registry") {
+	if hasFlag(args, "--all-sandboxes") && !hasFlag(args, "--registry") {
+		_, _ = fmt.Fprintln(r.Err, "error: --all-sandboxes requires --registry\n  try: rsbx secret rm --help")
+		return 1
+	}
+	if hasFlag(args, "--registry") || hasFlag(args, "--all-sandboxes") {
 		return r.registryRemove(ctx, args)
 	}
 	return r.serviceSecretRemove(ctx, args)

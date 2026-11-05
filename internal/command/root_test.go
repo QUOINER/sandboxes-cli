@@ -207,6 +207,28 @@ func TestRegistrySecretRemovalUsesSDK(t *testing.T) {
 	}
 }
 
+func TestSecretRemoveAllSandboxesRequiresRegistryBeforeConnecting(t *testing.T) {
+	var out bytes.Buffer
+	clientCalled := false
+	runner := &Runner{
+		Out: &out, Err: &out,
+		NewClient: func(string) (sdk.Client, error) {
+			clientCalled = true
+			return fakeClient{}, nil
+		},
+	}
+	if code := runner.Run(context.Background(), []string{"secret", "rm", "--all-sandboxes", "--force"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	want := "error: --all-sandboxes requires --registry\n  try: rsbx secret rm --help\n"
+	if out.String() != want {
+		t.Fatalf("output=%q, want %q", out.String(), want)
+	}
+	if clientCalled {
+		t.Fatal("invalid scope called daemon")
+	}
+}
+
 func TestSecretRemovalAliasesDispatchToServiceAndRegistryRemoval(t *testing.T) {
 	for _, alias := range []string{"remove", "delete", "unset"} {
 		for _, args := range [][]string{{"secret", alias, "openai"}, {"secret", alias, "--registry", "ghcr.io"}} {
