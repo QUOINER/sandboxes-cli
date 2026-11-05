@@ -40,17 +40,26 @@ func TestBuildSecretRemovalChoicesIncludesSupportedCredentialTypes(t *testing.T)
 		},
 		accounts: []string{"docker"},
 	}
-	choices := buildSecretRemovalChoices(inventory, "")
+	choices := buildSecretRemovalChoices(inventory, "", false)
 	if len(choices) != 5 {
 		t.Fatalf("choice count=%d choices=%+v", len(choices), choices)
 	}
-	choices = buildSecretRemovalChoices(inventory, "dev")
+	choices = buildSecretRemovalChoices(inventory, "dev", false)
 	if len(choices) != 2 {
 		t.Fatalf("sandbox-filtered choice count=%d choices=%+v", len(choices), choices)
 	}
 	for _, choice := range choices {
 		if choice.sandbox != "dev" || choice.provider != "" {
 			t.Fatalf("sandbox filter included an unrelated choice: %+v", choice)
+		}
+	}
+	choices = buildSecretRemovalChoices(inventory, "", true)
+	if len(choices) != 3 {
+		t.Fatalf("global-filtered choice count=%d choices=%+v", len(choices), choices)
+	}
+	for _, choice := range choices {
+		if choice.scope == sdk.SecretScopeSandbox || choice.regScope == sdk.RegistryScopeSandbox {
+			t.Fatalf("global filter included sandbox credential: %+v", choice)
 		}
 	}
 }
@@ -119,7 +128,7 @@ func TestSecretRemoveWithoutNameUsesInteractiveSelector(t *testing.T) {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 	if len(secrets.removed) != 1 || secrets.removed[0].Service != "openai" {
-		t.Fatalf("selected removal=%+v choices=%+v output=%q", secrets.removed, buildSecretRemovalChoices(secretRemovalInventory{services: secrets.items}, ""), out.String())
+		t.Fatalf("selected removal=%+v choices=%+v output=%q", secrets.removed, buildSecretRemovalChoices(secretRemovalInventory{services: secrets.items}, "", false), out.String())
 	}
 	if !screen.finis {
 		t.Fatal("selector did not finalize the terminal screen")

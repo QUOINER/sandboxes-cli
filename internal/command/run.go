@@ -91,6 +91,8 @@ Flags:
 	jsonFlag          = "--json"
 	workdirFlag       = "--workdir"
 	forceFlag         = "--force"
+	globalFlag        = "--global"
+	registryFlag      = "--registry"
 	userFlag          = "--user"
 	sandboxFlag       = "--sandbox"
 	graceFlag         = "--grace"

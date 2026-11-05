@@ -489,7 +489,7 @@ func (r *Runner) secretSetCommand(ctx context.Context, args []string) int {
 	if hasFlag(args, "--help") || hasFlag(args, "-h") {
 		return r.secretSetHelp()
 	}
-	if hasFlag(args, "--registry") {
+	if hasFlag(args, registryFlag) {
 		return r.registrySet(ctx, args)
 	}
 	return r.serviceSecretSet(ctx, args)
@@ -499,14 +499,18 @@ func (r *Runner) secretRemoveCommand(ctx context.Context, args []string) int {
 	if hasFlag(args, "--help") || hasFlag(args, "-h") {
 		return r.secretRemoveHelp()
 	}
+	if hasFlag(args, "--all") && hasFlag(args, globalFlag) {
+		_, _ = fmt.Fprintln(r.Err, "error: if any flags in the group [all global] are set none of the others can be; [all global] were all set\n  try: rsbx secret rm --help")
+		return 1
+	}
 	if hasFlag(args, "--all") {
 		return r.serviceSecretRemoveAll(ctx, args)
 	}
-	if hasFlag(args, "--all-sandboxes") && !hasFlag(args, "--registry") {
+	if hasFlag(args, "--all-sandboxes") && !hasFlag(args, registryFlag) {
 		_, _ = fmt.Fprintln(r.Err, "error: --all-sandboxes requires --registry\n  try: rsbx secret rm --help")
 		return 1
 	}
-	if hasFlag(args, "--registry") || hasFlag(args, "--all-sandboxes") {
+	if hasFlag(args, registryFlag) || hasFlag(args, "--all-sandboxes") {
 		return r.registryRemove(ctx, args)
 	}
 	return r.serviceSecretRemove(ctx, args)
@@ -670,6 +674,10 @@ func (r *Runner) serviceSecretRemoveAll(ctx context.Context, args []string) int 
 		return r.flagParseFailure("secret rm", err)
 	}
 	if !*all || fs.NArg() != 0 {
+		if *all && fs.NArg() != 0 {
+			_, _ = fmt.Fprintln(r.Err, "error: cannot specify a SERVICE argument when using --all\n  try: rsbx secret rm --help")
+			return 1
+		}
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret rm --all [--force]")
 		return 2
 	}
@@ -875,11 +883,13 @@ func (r *Runner) confirmSecretRemoval(target string, force bool) (bool, int) {
 }
 
 func (r *Runner) registryRemove(ctx context.Context, args []string) int {
+	args = reorderFlagArgs(args, map[string]bool{registryFlag: true, sandboxFlag: true, "--all-sandboxes": false, globalFlag: false, forceFlag: false, "-f": false})
 	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	registry := fs.String("registry", "", "registry host")
 	allSandboxes := fs.Bool("all-sandboxes", false, "remove all-sandboxes credential")
 	sandboxName := fs.String("sandbox", "", "remove credential for one sandbox")
+	global := fs.Bool("global", false, "deprecated: remove global credential")
 	force := fs.Bool("force", false, "delete without confirmation prompt")
 	fs.BoolVar(force, "f", false, "delete without confirmation prompt")
 	if err := fs.Parse(args); err != nil {
@@ -888,9 +898,16 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 		}
 		return r.flagParseFailure("secret rm", err)
 	}
-	if fs.NArg() != 0 || *registry == "" || *allSandboxes && *sandboxName != "" {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx secret rm [--registry HOST] [--all-sandboxes | --sandbox NAME]")
-		return 2
+	if message, code := registryRemovalArgumentError(*registry, fs.NArg(), *sandboxName, *global, *allSandboxes); code != 0 {
+		_, _ = fmt.Fprintln(r.Err, message)
+		return code
+	}
+	if fs.NArg() == 1 {
+		*sandboxName = fs.Arg(0)
+		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use --sandbox %s with --registry\n", *sandboxName)
+	}
+	if *global {
+		_, _ = fmt.Fprintln(r.Err, "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry")
 	}
 	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("registry credentials for %s", *registry), *force)
 	if code != 0 {
@@ -899,23 +916,50 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 	if !confirmed {
 		return 0
 	}
-	scope := sdk.RegistryScopeHostOnly
-	if *allSandboxes {
-		scope = sdk.RegistryScopeAllSandboxes
-	} else if *sandboxName != "" {
-		scope = sdk.RegistryScopeSandbox
-	}
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	scopes := []sdk.RegistryCredentialScope{scope}
-	if !*allSandboxes && *sandboxName == "" {
-		scopes = []sdk.RegistryCredentialScope{sdk.RegistryScopeHostOnly, sdk.RegistryScopeAllSandboxes}
-	}
+	scopes := registryRemovalScopes(*sandboxName, *global, *allSandboxes)
 	return r.removeRegistryScopes(ctx, client, *registry, *sandboxName, scopes)
+}
+
+func registryRemovalArgumentError(registry string, positionals int, sandboxName string, global, allSandboxes bool) (string, int) {
+	if conflict := registryRemovalScopeConflict(global, allSandboxes, sandboxName != ""); conflict != "" {
+		return conflict, 1
+	}
+	if registry == "" || positionals > 1 {
+		return "usage: rsbx secret rm [--registry HOST] [--all-sandboxes | --sandbox NAME]", 2
+	}
+	if positionals == 1 && (sandboxName != "" || global || allSandboxes) {
+		return "error: cannot combine a positional sandbox name with a scope flag\n  try: rsbx secret rm --help", 1
+	}
+	return "", 0
+}
+
+func registryRemovalScopes(sandboxName string, global, allSandboxes bool) []sdk.RegistryCredentialScope {
+	if allSandboxes {
+		return []sdk.RegistryCredentialScope{sdk.RegistryScopeAllSandboxes}
+	}
+	if sandboxName != "" {
+		return []sdk.RegistryCredentialScope{sdk.RegistryScopeSandbox}
+	}
+	if global {
+		return []sdk.RegistryCredentialScope{sdk.RegistryScopeHostOnly}
+	}
+	return []sdk.RegistryCredentialScope{sdk.RegistryScopeHostOnly, sdk.RegistryScopeAllSandboxes}
+}
+
+func registryRemovalScopeConflict(global, allSandboxes, sandbox bool) string {
+	if global && allSandboxes {
+		return "error: cannot specify both --global and --all-sandboxes\n  try: rsbx secret rm --help"
+	}
+	if sandbox && (global || allSandboxes) {
+		return "error: cannot combine --sandbox with --global or --all-sandboxes\n  try: rsbx secret rm --help"
+	}
+	return ""
 }
 
 func (r *Runner) removeRegistryScopes(ctx context.Context, client sdk.Client, registry, sandboxName string, scopes []sdk.RegistryCredentialScope) int {

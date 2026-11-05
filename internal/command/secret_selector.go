@@ -21,10 +21,10 @@ type secretRemovalChoice struct {
 	provider string
 }
 
-func buildSecretRemovalChoices(inventory secretRemovalInventory, sandboxFilter string) []secretRemovalChoice {
+func buildSecretRemovalChoices(inventory secretRemovalInventory, sandboxFilter string, globalOnly bool) []secretRemovalChoice {
 	choices := make([]secretRemovalChoice, 0, inventory.count())
 	for _, item := range inventory.services {
-		if sandboxFilter != "" && (item.Scope != sdk.SecretScopeSandbox || item.SandboxName != sandboxFilter) {
+		if !secretRemovalScopeMatches(string(item.Scope), item.SandboxName, sandboxFilter, globalOnly, string(sdk.SecretScopeGlobal)) {
 			continue
 		}
 		label := item.Service + " service secret (" + string(item.Scope)
@@ -34,7 +34,7 @@ func buildSecretRemovalChoices(inventory secretRemovalInventory, sandboxFilter s
 		choices = append(choices, secretRemovalChoice{label: sanitizeTerminalText(label + ")"), service: item.Service, scope: item.Scope, sandbox: item.SandboxName})
 	}
 	for _, item := range inventory.registries {
-		if sandboxFilter != "" && (item.Scope != string(sdk.RegistryScopeSandbox) || item.SandboxName != sandboxFilter) {
+		if !secretRemovalScopeMatches(item.Scope, item.SandboxName, sandboxFilter, globalOnly, string(sdk.RegistryScopeHostOnly)) {
 			continue
 		}
 		label := item.Registry + " registry credential (" + item.Scope
@@ -50,6 +50,13 @@ func buildSecretRemovalChoices(inventory secretRemovalInventory, sandboxFilter s
 	}
 	sort.Slice(choices, func(i, j int) bool { return choices[i].label < choices[j].label })
 	return choices
+}
+
+func secretRemovalScopeMatches(scope, sandboxName, sandboxFilter string, globalOnly bool, globalScope string) bool {
+	if sandboxFilter != "" {
+		return scope == string(sdk.SecretScopeSandbox) && sandboxName == sandboxFilter
+	}
+	return !globalOnly || scope == globalScope
 }
 
 func selectSecretRemovalChoice(screen tcell.Screen, choices []secretRemovalChoice) (int, error) {

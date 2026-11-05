@@ -218,32 +218,53 @@ func validServiceSecret(service string) bool {
 }
 
 func (r *Runner) serviceSecretRemove(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, oauthFlag: false, "--force": false, "-f": false})
+	args = reorderFlagArgs(args, map[string]bool{sandboxFlag: true, oauthFlag: false, globalFlag: false, forceFlag: false, "-f": false})
 	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")
 	oauth := fs.Bool("oauth", false, "remove host-side OpenAI OAuth credentials")
+	global := fs.Bool("global", false, "deprecated: remove global credentials")
 	force := fs.Bool("force", false, "delete without confirmation prompt")
 	fs.BoolVar(force, "f", false, "delete without confirmation prompt")
 	if code, done := r.parseFlagsOrFail("secret rm", fs, args); done {
 		return code
 	}
-	if fs.NArg() > 1 {
-		_, _ = fmt.Fprintf(r.Err, "usage: rsbx secret rm SERVICE [--sandbox NAME] [%s] [--force]\n", oauthFlag)
-		return 2
-	}
-	if fs.NArg() == 0 && !*oauth {
-		return r.serviceSecretRemoveInteractive(ctx, *sandboxName)
+	if message, code := secretRemovalArgumentError(fs.NArg(), *global, *sandboxName); code != 0 {
+		_, _ = fmt.Fprintln(r.Err, message)
+		return code
 	}
 	service := openAIService
-	if fs.NArg() == 1 {
+	if fs.NArg() == 2 {
+		*sandboxName = fs.Arg(0)
+		service = strings.ToLower(fs.Arg(1))
+		_, _ = fmt.Fprintf(r.Err, "warning: the positional sandbox scope is deprecated and will be removed in a future release; use rsbx secret rm %s --sandbox %s\n", service, *sandboxName)
+	} else if fs.NArg() == 1 {
 		service = strings.ToLower(fs.Arg(0))
+	}
+	if *global {
+		_, _ = fmt.Fprintln(r.Err, "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry")
+	}
+	if fs.NArg() == 0 && !*oauth {
+		return r.serviceSecretRemoveInteractive(ctx, *sandboxName, *global)
 	}
 	if *oauth && (service != openAIService || *sandboxName != "") {
 		r.error(fmt.Errorf("%s is supported only for global %s credentials", oauthFlag, openAIService))
 		return 2
 	}
 	return r.removeNamedServiceCredentials(ctx, service, *sandboxName, *oauth, *force)
+}
+
+func secretRemovalArgumentError(positionals int, global bool, sandboxName string) (string, int) {
+	if global && sandboxName != "" {
+		return "error: cannot specify both --global and --sandbox\n  try: rsbx secret rm --help", 1
+	}
+	if positionals > 1 && (global || sandboxName != "") {
+		return "error: accepts at most 1 SERVICE argument when --global or --sandbox is used\n  try: rsbx secret rm --help", 1
+	}
+	if positionals > 2 {
+		return fmt.Sprintf("usage: rsbx secret rm SERVICE [--sandbox NAME] [%s] [--force]", oauthFlag), 2
+	}
+	return "", 0
 }
 
 func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, sandboxName string, oauth, force bool) int {
@@ -299,7 +320,7 @@ func (r *Runner) removeOpenAIGlobalOAuth(ctx context.Context, client sdk.Client,
 	return apiKeyRemoved, 1
 }
 
-func (r *Runner) serviceSecretRemoveInteractive(ctx context.Context, sandboxFilter string) int {
+func (r *Runner) serviceSecretRemoveInteractive(ctx context.Context, sandboxFilter string, globalOnly bool) int {
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -311,7 +332,7 @@ func (r *Runner) serviceSecretRemoveInteractive(ctx context.Context, sandboxFilt
 		r.error(err)
 		return 1
 	}
-	choices := buildSecretRemovalChoices(inventory, sandboxFilter)
+	choices := buildSecretRemovalChoices(inventory, sandboxFilter, globalOnly)
 	if len(choices) == 0 {
 		_, _ = fmt.Fprintln(r.Out, "No supported credentials stored")
 		return 0

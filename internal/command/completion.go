@@ -26,7 +26,7 @@ var completionTree = map[string][]string{
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {forceFlag},
-	secretCommand:     {"--registry", usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", "--command", "--global", "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
+	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", "--command", globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	completionCommand: {},
 	"help":            {},
@@ -235,7 +235,7 @@ func flagsTakingValue(flags []string) []string {
 		envFileFlag: true, "--workspace": true, "--idempotency-key": true,
 		"-w": true, workdirFlag: true, "-u": true, userFlag: true,
 		formatFlag: true, "--limit": true, graceFlag: true, "--filter": true,
-		usernameFlag: true, "--registry": true, sandboxFlag: true,
+		usernameFlag: true, registryFlag: true, sandboxFlag: true,
 	}
 	out := make([]string, 0, len(flags))
 	for _, flag := range flags {

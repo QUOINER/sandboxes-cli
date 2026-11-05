@@ -229,6 +229,119 @@ func TestSecretRemoveAllSandboxesRequiresRegistryBeforeConnecting(t *testing.T) 
 	}
 }
 
+func TestDockerLegacySecretRemovalScopesAndGlobalAlias(t *testing.T) {
+	t.Run("service positional scope", func(t *testing.T) {
+		var out bytes.Buffer
+		secrets := &fakeServiceSecrets{}
+		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{secrets: secrets}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "legacy-sandbox", "github", "-f"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if len(secrets.removed) != 1 || secrets.removed[0].Service != "github" || secrets.removed[0].Scope != sdk.SecretScopeSandbox || secrets.removed[0].SandboxName != "legacy-sandbox" {
+			t.Fatalf("wrong legacy removal scope: %+v", secrets.removed)
+		}
+		if !strings.Contains(out.String(), "positional sandbox scope is deprecated") || !strings.Contains(out.String(), "secret rm github --sandbox legacy-sandbox") {
+			t.Fatalf("missing migration warning: %q", out.String())
+		}
+	})
+
+	t.Run("global alias on service", func(t *testing.T) {
+		var out bytes.Buffer
+		secrets := &fakeServiceSecrets{}
+		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{secrets: secrets}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "github", "--global", "-f"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if len(secrets.removed) != 1 || secrets.removed[0].Scope != sdk.SecretScopeGlobal {
+			t.Fatalf("--global did not select global scope: %+v", secrets.removed)
+		}
+		if !strings.Contains(out.String(), "--global is deprecated") {
+			t.Fatalf("missing deprecation warning: %q", out.String())
+		}
+	})
+
+	t.Run("registry positional scope", func(t *testing.T) {
+		var out bytes.Buffer
+		registry := &fakeRegistryCredentials{}
+		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{registry: registry}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "legacy-sandbox", "-f"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if len(registry.requests) != 1 || registry.requests[0].Scope != sdk.RegistryScopeSandbox || registry.requests[0].SandboxName != "legacy-sandbox" {
+			t.Fatalf("wrong registry legacy scope: %+v", registry.requests)
+		}
+		if !strings.Contains(out.String(), "use --sandbox legacy-sandbox with --registry") {
+			t.Fatalf("missing migration warning: %q", out.String())
+		}
+	})
+
+	t.Run("global registry selects host-only", func(t *testing.T) {
+		var out bytes.Buffer
+		registry := &fakeRegistryCredentials{}
+		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{registry: registry}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "--global", "-f"}); code != 0 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if len(registry.requests) != 1 || registry.requests[0].Scope != sdk.RegistryScopeHostOnly {
+			t.Fatalf("--global registry scope requests=%+v", registry.requests)
+		}
+	})
+}
+
+func TestSecretRemovalRejectsDockerScopeConflictsBeforeConnecting(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"secret", "rm", "--all", "--global"}, want: "error: if any flags in the group [all global] are set none of the others can be; [all global] were all set\n  try: rsbx secret rm --help\n"},
+		{args: []string{"secret", "rm", "--global", "--sandbox", "sample", "github"}, want: "error: cannot specify both --global and --sandbox\n  try: rsbx secret rm --help\n"},
+		{args: []string{"secret", "rm", "--registry", "ghcr.io", "--all-sandboxes", "--sandbox", "sample"}, want: "error: cannot combine --sandbox with --global or --all-sandboxes\n  try: rsbx secret rm --help\n"},
+		{args: []string{"secret", "rm", "--registry", "ghcr.io", "legacy-scope", "--sandbox", "sample"}, want: "error: cannot combine a positional sandbox name with a scope flag\n  try: rsbx secret rm --help\n"},
+		{args: []string{"secret", "rm", "legacy-scope", "github", "--sandbox", "sample"}, want: "error: accepts at most 1 SERVICE argument when --global or --sandbox is used\n  try: rsbx secret rm --help\n"},
+	}
+	for _, test := range tests {
+		var out bytes.Buffer
+		clientCalled := false
+		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+			clientCalled = true
+			return fakeClient{}, nil
+		}}
+		if code := runner.Run(context.Background(), test.args); code != 1 {
+			t.Errorf("%v: exit=%d output=%q", test.args, code, out.String())
+		}
+		if out.String() != test.want {
+			t.Errorf("%v: output=%q, want %q", test.args, out.String(), test.want)
+		}
+		if clientCalled {
+			t.Errorf("%v: conflicting scopes connected to daemon", test.args)
+		}
+	}
+}
+
+func TestSecretRemoveAllRejectsServiceArgumentLikeDocker(t *testing.T) {
+	var out bytes.Buffer
+	clientCalled := false
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+		clientCalled = true
+		return fakeClient{}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"secret", "rm", "--all", "synthetic-invalid-service"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	want := "error: cannot specify a SERVICE argument when using --all\n  try: rsbx secret rm --help\n"
+	if out.String() != want || clientCalled {
+		t.Fatalf("output=%q client-called=%t, want %q without client call", out.String(), clientCalled, want)
+	}
+}
+
 func TestSecretRemovalAliasesDispatchToServiceAndRegistryRemoval(t *testing.T) {
 	for _, alias := range []string{"remove", "delete", "unset"} {
 		for _, args := range [][]string{{"secret", alias, "openai"}, {"secret", alias, "--registry", "ghcr.io"}} {
