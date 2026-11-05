@@ -93,6 +93,7 @@ Flags:
 	forceFlag         = "--force"
 	globalFlag        = "--global"
 	registryFlag      = "--registry"
+	globalScopeLabel  = "(global)"
 	userFlag          = "--user"
 	sandboxFlag       = "--sandbox"
 	graceFlag         = "--grace"

@@ -268,16 +268,6 @@ func secretRemovalArgumentError(positionals int, global bool, sandboxName string
 }
 
 func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, sandboxName string, oauth, force bool) int {
-	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("%s credentials", service), force)
-	if code != 0 {
-		return code
-	}
-	if !confirmed {
-		return 0
-	}
-	if oauth {
-		return r.serviceSecretOAuthRemove(ctx, service, sandboxName)
-	}
 	scope := sdk.SecretScopeGlobal
 	if sandboxName != "" {
 		scope = sdk.SecretScopeSandbox
@@ -288,12 +278,76 @@ func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, san
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	present, err := namedServiceCredentialPresent(ctx, client, service, scope, sandboxName, oauth)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if !present {
+		_, _ = fmt.Fprintf(r.Err, "error: no secret found for service %q in scope %q\n", service, serviceCredentialScopeLabel(scope, sandboxName))
+		return 1
+	}
+	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("%s credentials", service), force)
+	if code != 0 {
+		return code
+	}
+	if !confirmed {
+		return 0
+	}
+	if oauth {
+		return r.removeNamedOAuthCredential(ctx, client, openAIService)
+	}
+	return r.removeNamedServiceValue(ctx, client, service, scope, sandboxName)
+}
+
+func namedServiceCredentialPresent(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string, oauthOnly bool) (bool, error) {
+	present := false
+	var err error
+	if !oauthOnly {
+		present, err = serviceCredentialPresent(ctx, client, service, scope, sandboxName)
+		if err != nil {
+			return false, err
+		}
+	}
+	if oauthOnly || service == openAIService && scope == sdk.SecretScopeGlobal {
+		oauthPresent, statusErr := sdk.AccountStatus(client).Status(ctx, openAIService)
+		if statusErr != nil {
+			return false, fmt.Errorf("check %s OAuth credentials before removal: %w", openAIService, statusErr)
+		}
+		present = present || oauthPresent
+	}
+	return present, nil
+}
+
+func serviceCredentialScopeLabel(scope sdk.SecretScope, sandboxName string) string {
+	if scope == sdk.SecretScopeSandbox {
+		return sandboxName
+	}
+	return globalScopeLabel
+}
+
+func (r *Runner) removeNamedOAuthCredential(ctx context.Context, client sdk.Client, service string) int {
+	removed, err := sdk.Accounts(client).Logout(ctx, service)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if removed {
+		_, _ = fmt.Fprintf(r.Out, "Removed %s OAuth credentials\n", service)
+	} else {
+		_, _ = fmt.Fprintf(r.Out, "No %s OAuth credentials stored\n", service)
+	}
+	return 0
+}
+
+func (r *Runner) removeNamedServiceValue(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string) int {
 	removed, err := sdk.Secrets(client).Remove(ctx, service, scope, sandboxName)
 	if err != nil {
 		r.error(err)
 		return 1
 	}
 	if service == openAIService && scope == sdk.SecretScopeGlobal {
+		var code int
 		removed, code = r.removeOpenAIGlobalOAuth(ctx, client, service, removed)
 		if code != 0 {
 			return code
@@ -305,6 +359,19 @@ func (r *Runner) removeNamedServiceCredentials(ctx context.Context, service, san
 		_, _ = fmt.Fprintf(r.Out, "No %s credentials stored\n", service)
 	}
 	return 0
+}
+
+func serviceCredentialPresent(ctx context.Context, client sdk.Client, service string, scope sdk.SecretScope, sandboxName string) (bool, error) {
+	items, err := sdk.Secrets(client).List(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list service credentials before removal: %w", err)
+	}
+	for _, item := range items {
+		if item.Service == service && item.Scope == scope && item.SandboxName == sandboxName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *Runner) removeOpenAIGlobalOAuth(ctx context.Context, client sdk.Client, service string, apiKeyRemoved bool) (bool, int) {
@@ -396,30 +463,6 @@ func (r *Runner) removeSecretChoice(ctx context.Context, client sdk.Client, choi
 	return 0
 }
 
-func (r *Runner) serviceSecretOAuthRemove(ctx context.Context, service, sandboxName string) int {
-	if service != openAIService || sandboxName != "" {
-		r.error(fmt.Errorf("%s is supported only for global %s credentials", oauthFlag, openAIService))
-		return 2
-	}
-	client, err := r.client()
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	defer func() { _ = client.Close() }()
-	removed, err := sdk.Accounts(client).Logout(ctx, openAIService)
-	if err != nil {
-		r.error(err)
-		return 1
-	}
-	if removed {
-		_, _ = fmt.Fprintf(r.Out, "Removed %s OAuth credentials\n", openAIService)
-	} else {
-		_, _ = fmt.Fprintf(r.Out, "No %s OAuth credentials stored\n", openAIService)
-	}
-	return 0
-}
-
 //nolint:gocognit,gocyclo,cyclop,funlen // one command renders two credential types and three formats.
 func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("secret ls", flag.ContinueOnError)
@@ -493,7 +536,7 @@ func (r *Runner) serviceSecretList(ctx context.Context, args []string) int {
 		for _, item := range out {
 			sandbox := item.SandboxName
 			if sandbox == "" {
-				sandbox = "(global)"
+				sandbox = globalScopeLabel
 			}
 			username := item.Username
 			if username == "" {

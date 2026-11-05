@@ -861,8 +861,8 @@ func (r *Runner) confirmSecretRemoval(target string, force bool) (bool, int) {
 	}
 	input, ok := r.In.(*os.File)
 	if !ok || !term.IsTerminal(int(input.Fd())) {
-		_, _ = fmt.Fprintln(r.Err, "secret removal requires an interactive terminal; pass --force to skip confirmation")
-		return false, 2
+		_, _ = fmt.Fprintln(r.Err, "error: stdin is not a terminal; use --force to skip confirmation")
+		return false, 1
 	}
 	if _, err := fmt.Fprintf(r.Err, "Remove %s? [y/N] ", target); err != nil {
 		r.error(err)
@@ -909,13 +909,6 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 	if *global {
 		_, _ = fmt.Fprintln(r.Err, "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry")
 	}
-	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("registry credentials for %s", *registry), *force)
-	if code != 0 {
-		return code
-	}
-	if !confirmed {
-		return 0
-	}
 	client, err := r.client()
 	if err != nil {
 		r.error(err)
@@ -923,7 +916,54 @@ func (r *Runner) registryRemove(ctx context.Context, args []string) int {
 	}
 	defer func() { _ = client.Close() }()
 	scopes := registryRemovalScopes(*sandboxName, *global, *allSandboxes)
+	lister, ok := sdk.RegistryCredentialList(client)
+	if !ok {
+		r.error(errors.New("registry credential inventory is unavailable; refusing removal before confirmation"))
+		return 1
+	}
+	items, err := lister.ListRegistryCredentials(ctx)
+	if err != nil {
+		r.error(fmt.Errorf("list registry credentials before removal: %w", err))
+		return 1
+	}
+	if !registryCredentialPresent(items, *registry, *sandboxName, scopes) {
+		scopeName := registryRemovalScopeName(*sandboxName, *allSandboxes)
+		_, _ = fmt.Fprintf(r.Err, "error: no registry secret found for %q in scope %q\n", *registry, scopeName)
+		return 1
+	}
+	confirmed, code := r.confirmSecretRemoval(fmt.Sprintf("registry credentials for %s", *registry), *force)
+	if code != 0 {
+		return code
+	}
+	if !confirmed {
+		return 0
+	}
 	return r.removeRegistryScopes(ctx, client, *registry, *sandboxName, scopes)
+}
+
+func registryCredentialPresent(items []sdk.RegistryCredentialSummary, registry, sandboxName string, scopes []sdk.RegistryCredentialScope) bool {
+	for _, item := range items {
+		if item.Registry != registry || item.SandboxName != sandboxName {
+			continue
+		}
+		for _, scope := range scopes {
+			if item.Scope == string(scope) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func registryRemovalScopeName(sandboxName string, allSandboxes bool) string {
+	if sandboxName != "" {
+		return sandboxName
+	}
+	if allSandboxes {
+		return "(all-sandboxes)"
+	}
+	// Both explicit global and default registry removal use Docker's global label.
+	return globalScopeLabel
 }
 
 func registryRemovalArgumentError(registry string, positionals int, sandboxName string, global, allSandboxes bool) (string, int) {

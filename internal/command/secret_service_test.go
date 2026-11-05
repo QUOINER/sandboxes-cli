@@ -40,9 +40,9 @@ func (f *recordingAccounts) Logout(_ context.Context, provider string) (bool, er
 }
 
 func TestSecretRemoveOpenAIAlsoRemovesGlobalOAuthCredential(t *testing.T) {
-	secrets := &fakeServiceSecrets{}
+	secrets := &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: openAIService, Scope: sdk.SecretScopeGlobal}}}
 	accounts := &recordingAccounts{removed: true}
-	client := fakeClient{secrets: secrets, accounts: accounts}
+	client := fakeClient{secrets: secrets, accounts: accounts, accountStatuses: fakeAccountStatus{statuses: map[string]bool{openAIService: true}}}
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
 	if code := runner.Run(context.Background(), []string{"secret", "rm", "openai", "--force"}); code != 0 {
@@ -85,7 +85,7 @@ func TestSecretSetTokenShortFlag(t *testing.T) {
 }
 
 func TestSecretRemoveSandboxOpenAIDoesNotRemoveGlobalOAuth(t *testing.T) {
-	secrets := &fakeServiceSecrets{}
+	secrets := &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: openAIService, Scope: sdk.SecretScopeSandbox, SandboxName: "dev"}}}
 	accounts := &recordingAccounts{removed: true}
 	client := fakeClient{secrets: secrets, accounts: accounts}
 	var out bytes.Buffer
@@ -102,9 +102,9 @@ func TestSecretRemoveSandboxOpenAIDoesNotRemoveGlobalOAuth(t *testing.T) {
 }
 
 func TestSecretRemoveOpenAIReportsPartialOAuthRevocationFailure(t *testing.T) {
-	secrets := &fakeServiceSecrets{}
+	secrets := &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: openAIService, Scope: sdk.SecretScopeGlobal}}}
 	accounts := &recordingAccounts{err: errors.New("synthetic revocation failure")}
-	client := fakeClient{secrets: secrets, accounts: accounts}
+	client := fakeClient{secrets: secrets, accounts: accounts, accountStatuses: fakeAccountStatus{statuses: map[string]bool{openAIService: true}}}
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) { return client, nil }}
 	if code := runner.Run(context.Background(), []string{"secret", "rm", "openai", "--force"}); code != 1 {
@@ -112,6 +112,56 @@ func TestSecretRemoveOpenAIReportsPartialOAuthRevocationFailure(t *testing.T) {
 	}
 	if len(secrets.removed) != 1 || !strings.Contains(out.String(), "Removed openai API key, but OAuth credential removal failed") {
 		t.Fatalf("partial result not reported: removed=%+v output=%q", secrets.removed, out.String())
+	}
+}
+
+func TestNamedServiceRemovalChecksInventoryBeforeConfirmation(t *testing.T) {
+	t.Run("missing credential reports missing target", func(t *testing.T) {
+		var out bytes.Buffer
+		secrets := &fakeServiceSecrets{}
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{secrets: secrets}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "github", "--global"}); code != 1 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		want := "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry\nerror: no secret found for service \"github\" in scope \"(global)\"\n"
+		if out.String() != want || secrets.removeCalls != 0 {
+			t.Fatalf("output=%q removals=%d, want %q and no mutation", out.String(), secrets.removeCalls, want)
+		}
+	})
+
+	t.Run("inventory error blocks prompt and mutation", func(t *testing.T) {
+		var out bytes.Buffer
+		secrets := &fakeServiceSecrets{listErr: errors.New("synthetic inventory failure")}
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{secrets: secrets}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "github", "--force"}); code != 1 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if !strings.Contains(out.String(), "list service credentials before removal: synthetic inventory failure") || secrets.removeCalls != 0 {
+			t.Fatalf("output=%q removals=%d", out.String(), secrets.removeCalls)
+		}
+	})
+}
+
+func TestOpenAIRemovalFailsClosedWhenOAuthStatusIsUnavailable(t *testing.T) {
+	var out bytes.Buffer
+	secrets := &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: openAIService, Scope: sdk.SecretScopeGlobal}}}
+	accounts := &recordingAccounts{}
+	runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
+		return fakeClient{
+			secrets:         secrets,
+			accounts:        accounts,
+			accountStatuses: fakeAccountStatus{err: errors.New("synthetic status failure")},
+		}, nil
+	}}
+	if code := runner.Run(context.Background(), []string{"secret", "rm", openAIService, "--force"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, out.String())
+	}
+	if secrets.removeCalls != 0 || len(accounts.loggedOut) != 0 || !strings.Contains(out.String(), "check openai OAuth credentials before removal: synthetic status failure") {
+		t.Fatalf("removal did not fail closed: service removals=%d account logouts=%v output=%q", secrets.removeCalls, accounts.loggedOut, out.String())
 	}
 }
 

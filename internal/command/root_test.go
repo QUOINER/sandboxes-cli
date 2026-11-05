@@ -150,7 +150,7 @@ func TestOpenAIOAuthSecretCommandsUseHostAccountService(t *testing.T) {
 		var out bytes.Buffer
 		accounts := &fakeAccounts{}
 		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("must-not-be-read\n"), Socket: "unused", NewClient: func(string) (sdk.Client, error) {
-			return fakeClient{accounts: accounts}, nil
+			return fakeClient{accounts: accounts, accountStatuses: fakeAccountStatus{statuses: map[string]bool{openAIService: true}}}, nil
 		}}
 		if code := runner.Run(context.Background(), args); code != 0 {
 			t.Fatalf("%v: exit=%d output=%q", args, code, out.String())
@@ -185,7 +185,11 @@ func TestRegistrySecretRemovalUsesSDK(t *testing.T) {
 	}
 	for _, test := range tests {
 		var out bytes.Buffer
-		registry := &fakeRegistryCredentials{}
+		registry := &fakeRegistryCredentials{items: []sdk.RegistryCredentialSummary{
+			{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeHostOnly)},
+			{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeAllSandboxes)},
+			{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeSandbox), SandboxName: "dev"},
+		}}
 		runner := &Runner{
 			Out: &out, Err: &out, Socket: "unused",
 			NewClient: func(string) (sdk.Client, error) { return fakeClient{registry: registry}, nil },
@@ -205,6 +209,37 @@ func TestRegistrySecretRemovalUsesSDK(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestRegistryRemovalChecksInventoryBeforeConfirmation(t *testing.T) {
+	t.Run("missing credential reports missing target", func(t *testing.T) {
+		var out bytes.Buffer
+		registry := &fakeRegistryCredentials{}
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{registry: registry}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "--global"}); code != 1 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		want := "warning: --global is deprecated; global is now the default for service secrets; omit --global, use --sandbox to target one sandbox, or use --all-sandboxes with --registry\nerror: no registry secret found for \"ghcr.io\" in scope \"(global)\"\n"
+		if out.String() != want || len(registry.requests) != 0 {
+			t.Fatalf("output=%q removals=%d, want %q and no mutation", out.String(), len(registry.requests), want)
+		}
+	})
+
+	t.Run("inventory error blocks prompt and mutation", func(t *testing.T) {
+		var out bytes.Buffer
+		registry := &fakeRegistryCredentials{listErr: errors.New("synthetic inventory failure")}
+		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader(""), NewClient: func(string) (sdk.Client, error) {
+			return fakeClient{registry: registry}, nil
+		}}
+		if code := runner.Run(context.Background(), []string{"secret", "rm", "--registry", "ghcr.io", "--force"}); code != 1 {
+			t.Fatalf("exit=%d output=%q", code, out.String())
+		}
+		if !strings.Contains(out.String(), "list registry credentials before removal: synthetic inventory failure") || len(registry.requests) != 0 {
+			t.Fatalf("output=%q removals=%d", out.String(), len(registry.requests))
+		}
+	})
 }
 
 func TestSecretRemoveAllSandboxesRequiresRegistryBeforeConnecting(t *testing.T) {
@@ -232,7 +267,7 @@ func TestSecretRemoveAllSandboxesRequiresRegistryBeforeConnecting(t *testing.T) 
 func TestDockerLegacySecretRemovalScopesAndGlobalAlias(t *testing.T) {
 	t.Run("service positional scope", func(t *testing.T) {
 		var out bytes.Buffer
-		secrets := &fakeServiceSecrets{}
+		secrets := &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: "github", Scope: sdk.SecretScopeSandbox, SandboxName: "legacy-sandbox"}}}
 		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{secrets: secrets}, nil
 		}}
@@ -249,7 +284,7 @@ func TestDockerLegacySecretRemovalScopesAndGlobalAlias(t *testing.T) {
 
 	t.Run("global alias on service", func(t *testing.T) {
 		var out bytes.Buffer
-		secrets := &fakeServiceSecrets{}
+		secrets := &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: "github", Scope: sdk.SecretScopeGlobal}}}
 		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{secrets: secrets}, nil
 		}}
@@ -266,7 +301,7 @@ func TestDockerLegacySecretRemovalScopesAndGlobalAlias(t *testing.T) {
 
 	t.Run("registry positional scope", func(t *testing.T) {
 		var out bytes.Buffer
-		registry := &fakeRegistryCredentials{}
+		registry := &fakeRegistryCredentials{items: []sdk.RegistryCredentialSummary{{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeSandbox), SandboxName: "legacy-sandbox"}}}
 		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{registry: registry}, nil
 		}}
@@ -283,7 +318,7 @@ func TestDockerLegacySecretRemovalScopesAndGlobalAlias(t *testing.T) {
 
 	t.Run("global registry selects host-only", func(t *testing.T) {
 		var out bytes.Buffer
-		registry := &fakeRegistryCredentials{}
+		registry := &fakeRegistryCredentials{items: []sdk.RegistryCredentialSummary{{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeHostOnly)}}}
 		runner := &Runner{Out: &out, Err: &out, NewClient: func(string) (sdk.Client, error) {
 			return fakeClient{registry: registry}, nil
 		}}
@@ -407,15 +442,33 @@ func TestAgentManagementCommandFailsExplicitly(t *testing.T) {
 }
 
 func TestSecretRemovalRequiresForceOutsideInteractiveTerminal(t *testing.T) {
-	for _, args := range [][]string{{"secret", "rm", "openai"}, {"secret", "rm", "--registry", "ghcr.io"}} {
+	for _, test := range []struct {
+		args   []string
+		client sdk.Client
+	}{
+		{
+			args: []string{"secret", "rm", "openai"},
+			client: fakeClient{
+				secrets:         &fakeServiceSecrets{items: []sdk.ServiceSecret{{Service: openAIService, Scope: sdk.SecretScopeGlobal}}},
+				accountStatuses: fakeAccountStatus{statuses: map[string]bool{openAIService: true}},
+			},
+		},
+		{
+			args: []string{"secret", "rm", "--registry", "ghcr.io"},
+			client: fakeClient{registry: &fakeRegistryCredentials{items: []sdk.RegistryCredentialSummary{
+				{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeHostOnly)},
+				{Registry: "ghcr.io", Scope: string(sdk.RegistryScopeAllSandboxes)},
+			}}},
+		},
+	} {
 		var out bytes.Buffer
 		clientCalled := false
 		runner := &Runner{Out: &out, Err: &out, In: strings.NewReader("yes\n"), NewClient: func(string) (sdk.Client, error) {
 			clientCalled = true
-			return fakeClient{}, nil
+			return test.client, nil
 		}}
-		if code := runner.Run(context.Background(), args); code != 2 || clientCalled || !strings.Contains(out.String(), "--force") {
-			t.Fatalf("%v: exit=%d client-called=%t output=%q", args, code, clientCalled, out.String())
+		if code := runner.Run(context.Background(), test.args); code != 1 || !clientCalled || out.String() != "error: stdin is not a terminal; use --force to skip confirmation\n" {
+			t.Fatalf("%v: exit=%d client-called=%t output=%q", test.args, code, clientCalled, out.String())
 		}
 	}
 }
