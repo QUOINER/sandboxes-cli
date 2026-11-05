@@ -10,6 +10,24 @@ import (
 	sdk "github.com/rheic/sandboxes-go-sdk"
 )
 
+func TestSecretImportHelpDocumentsBehaviorAndOAuthScope(t *testing.T) {
+	var output bytes.Buffer
+	runner := &Runner{Out: &output, Err: &output}
+	if code := runner.secretImportHelp(); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	for _, want := range []string{
+		"--all adds new values without prompts and leaves existing ones intact.",
+		"--force saves every detected value, replacing existing entries too.",
+		"A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.",
+		"--dry-run never writes",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("help missing %q: %q", want, output.String())
+		}
+	}
+}
+
 func TestSecretImportFailsClosedWhenInventoryCannotBeRead(t *testing.T) {
 	t.Setenv("GH_TOKEN", "synthetic-token")
 	secrets := &fakeServiceSecrets{listErr: errors.New("synthetic inventory failure")}

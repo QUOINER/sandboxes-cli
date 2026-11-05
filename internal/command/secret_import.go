@@ -32,31 +32,45 @@ var serviceEnvVars = map[string][]string{
 
 func (r *Runner) secretImportHelp() int {
 	const usage = `Description:
-  Import supported service secrets detected in host environment variables.
-  Available services: anthropic, copilot, cursor, devin, droid, github, google,
-  groq, mistral, nebius, openai, openrouter, xai.
+  Copy supported host credential variables (such as OPENAI_API_KEY,
+  ANTHROPIC_API_KEY and GH_TOKEN) into the shared secret store. Sandboxes can
+  then use those saved credentials without exporting each variable per shell.
 
-  Existing global entries require confirmation before overwrite. Each detected
-  value shows a last-four-character preview and prompts with a default of yes
-  unless --all or --force is passed. --all imports new entries and skips existing
-  ones; --force imports without prompting and overwrites existing entries.
+  Detected variables are shown one at a time with a Y/n prompt and a preview
+  of the value's final four characters. Replacing a saved value is explicit:
+
+    - Interactive mode asks before replacing an existing value.
+    - --all adds new values without prompts and leaves existing ones intact.
+    - --force saves every detected value, replacing existing entries too.
+
   A stored OpenAI OAuth session takes precedence over OPENAI_API_KEY.
   --dry-run never writes and shows only a last-four-character preview.
+  Available services: anthropic, copilot, cursor, devin, droid, github, google,
+  groq, mistral, nebius, openai, openrouter, xai.
 
 Usage:
   rsbx secret import [SERVICE] [flags]
 
 Examples:
+  # Walk every detected env var, prompting before each import
   rsbx secret import
+
+  # Import only the github service
   rsbx secret import github
+
+  # Non-interactive: import everything detected without prompting
   rsbx secret import --all
+
+  # Overwrite an existing stored entry without confirmation
   rsbx secret import github --force
+
+  # Preview what would be imported without writing
   rsbx secret import --dry-run
 
 Flags:
-      --all       Import every detected variable without prompting
+      --all       Import every detected env var without prompting
       --dry-run   Show what would be imported without writing
-  -f, --force     Overwrite an existing stored entry
+  -f, --force     Overwrite an existing stored entry without confirmation
   -h, --help      Show this help
 `
 	if _, err := io.WriteString(r.Out, usage); err != nil {
