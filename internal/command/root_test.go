@@ -502,8 +502,17 @@ func TestAccountCommandsUseAccountService(t *testing.T) {
 		if code := runner.Run(context.Background(), []string{command, "--help"}); code != 0 {
 			t.Fatalf("%s --help exit=%d", command, code)
 		}
-		if command == "login" && !strings.Contains(out.String(), "Docker device authorization") {
-			t.Fatalf("login help omitted browser device authorization: %q", out.String())
+		if command == "login" {
+			for _, expected := range []string{"Description:\n  Sign in to Docker", "Examples:", "--password-stdin", "--username string"} {
+				if !strings.Contains(out.String(), expected) {
+					t.Fatalf("login help omitted %q: %q", expected, out.String())
+				}
+			}
+			if strings.Contains(out.String(), "\n  -username") {
+				t.Fatalf("login help exposed Go's short single-dash spelling: %q", out.String())
+			}
+		} else if !strings.Contains(out.String(), "Stop running local sandboxes and sign out of Docker") || !strings.Contains(out.String(), "-f, --force") {
+			t.Fatalf("logout help omitted Docker-compatible description or force alias: %q", out.String())
 		}
 	}
 }
@@ -558,17 +567,21 @@ func TestLoginDockerPATRejectsInvalidStdinWithoutConnecting(t *testing.T) {
 }
 
 func TestLogoutForceStopsRunningLocalSandboxes(t *testing.T) {
-	var out bytes.Buffer
-	sandbox := &logoutSandbox{}
-	accounts := &fakeAccounts{}
-	runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
-		return fakeClient{sandbox: sandbox, accounts: accounts}, nil
-	}}
-	if code := runner.Run(context.Background(), []string{"logout", "--force"}); code != 0 {
-		t.Fatalf("exit=%d output=%q", code, out.String())
-	}
-	if sandbox.stops != 1 || !strings.Contains(out.String(), "Stopped 1 running local sandbox") {
-		t.Fatalf("logout did not stop the owned running sandbox: stops=%d output=%q", sandbox.stops, out.String())
+	for _, forceArg := range []string{"--force", "-f"} {
+		t.Run(forceArg, func(t *testing.T) {
+			var out bytes.Buffer
+			sandbox := &logoutSandbox{}
+			accounts := &fakeAccounts{}
+			runner := &Runner{Out: &out, Err: &out, Socket: "unused", NewClient: func(string) (sdk.Client, error) {
+				return fakeClient{sandbox: sandbox, accounts: accounts}, nil
+			}}
+			if code := runner.Run(context.Background(), []string{"logout", forceArg}); code != 0 {
+				t.Fatalf("exit=%d output=%q", code, out.String())
+			}
+			if sandbox.stops != 1 || !strings.Contains(out.String(), "Stopped 1 running local sandbox") {
+				t.Fatalf("logout did not stop the owned running sandbox: stops=%d output=%q", sandbox.stops, out.String())
+			}
+		})
 	}
 }
 

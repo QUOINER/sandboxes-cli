@@ -263,8 +263,8 @@ Existing Docker Hub registry entries cause login to fail instead of being
 overwritten. Authenticated sandbox registry pulls are not connected to the
 guest network path yet.
 
-`rsbx logout` asks before stopping running local sandboxes. `--force` skips the
-prompt, stops only sandboxes owned by the selected local daemon, then removes
+`rsbx logout` asks before stopping running local sandboxes. `--force`/`-f` skips
+the prompt, stops only sandboxes owned by the selected local daemon, then removes
 the OAuth-owned Docker Hub credentials and requests provider token revocation.
 Registry credentials created separately with `rsbx secret set` are preserved.
 If the provider cannot revoke a refresh token, the CLI reports that local

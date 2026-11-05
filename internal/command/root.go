@@ -224,9 +224,18 @@ func (r *Runner) accountLogin(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "usage: rsbx login [--username USER --password-stdin]")
-		_, _ = fmt.Fprintln(fs.Output(), "Without flags, complete Docker device authorization in your browser.")
-		fs.PrintDefaults()
+		_, _ = fmt.Fprintln(fs.Output(), "Description:")
+		_, _ = fmt.Fprintln(fs.Output(), "  Sign in to Docker")
+		_, _ = fmt.Fprintln(fs.Output(), "\nUsage:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx login [flags]")
+		_, _ = fmt.Fprintln(fs.Output(), "\nExamples:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx login")
+		_, _ = fmt.Fprintln(fs.Output(), "\n  # Non-interactive sign-in, for CI")
+		_, _ = fmt.Fprintln(fs.Output(), "  echo \"$DOCKER_PAT\" | rsbx login --username me --password-stdin")
+		_, _ = fmt.Fprintln(fs.Output(), "\nFlags:")
+		_, _ = fmt.Fprintln(fs.Output(), "  -h, --help              help for login")
+		_, _ = fmt.Fprintln(fs.Output(), "      --password-stdin    Read password or access token from stdin")
+		_, _ = fmt.Fprintln(fs.Output(), "      --username string   Docker username for non-interactive login")
 	}
 	username := fs.String("username", "", "Docker Hub username for PAT login")
 	passwordStdin := fs.Bool("password-stdin", false, "read Docker Hub password or PAT from stdin")
@@ -330,7 +339,21 @@ func readDockerPassword(input io.Reader) ([]byte, error) {
 func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "Description:")
+		_, _ = fmt.Fprintln(fs.Output(), "  Stop running local sandboxes and sign out of Docker")
+		_, _ = fmt.Fprintln(fs.Output(), "\nUsage:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout [flags]")
+		_, _ = fmt.Fprintln(fs.Output(), "\nExamples:")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout")
+		_, _ = fmt.Fprintln(fs.Output(), "\n  # Skip the confirmation prompt")
+		_, _ = fmt.Fprintln(fs.Output(), "  rsbx logout --force")
+		_, _ = fmt.Fprintln(fs.Output(), "\nFlags:")
+		_, _ = fmt.Fprintln(fs.Output(), "  -f, --force   Skip confirmation prompt")
+		_, _ = fmt.Fprintln(fs.Output(), "  -h, --help    help for logout")
+	}
 	force := fs.Bool("force", false, "skip confirmation")
+	forceShort := fs.Bool("f", false, "skip confirmation")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -341,7 +364,7 @@ func (r *Runner) accountLogout(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx logout [--force]")
 		return 2
 	}
-	if !*force {
+	if !*force && !*forceShort {
 		confirmed, err := r.confirmLogout()
 		if err != nil {
 			r.error(err)
