@@ -140,11 +140,10 @@ session. `rsbx settings ls|get|set|unset` manages
 `defaults.cpus`, `defaults.memory_mib`, `sandbox.disk.dockerVolume`); DNS and
 daemon-owned consumers need a daemon restart. `rsbx secret` stores service API
 keys and registry credentials in the host keychain. Service secret values are
-not written to SQLite, logs or argv. `-e KEY=${secret:service}` is resolved by
-the daemon at exec time; sandbox scope wins over global. `${proxy:service}` is reserved for a host proxy but currently fails closed: the
-pinned guest network lacks a reliable guest-to-host route for an arbitrary
-loopback listener. Use direct secret env only for agents you trust with the
-key.
+not written to SQLite, logs or argv. `${secret:service}` environment references
+are rejected because guest processes can read environment values. Migrate
+scripts to a supported host proxy route; the proxy keeps the real credential on
+the host and adds it only to requests sent to a fixed provider host.
 
 `rsbx cp` copies regular files and directory trees in either direction; exactly
 one side is `SANDBOX:PATH` with an absolute guest path. A guest destination

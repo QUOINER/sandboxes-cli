@@ -876,7 +876,7 @@ func (r *Runner) createRunSandbox(ctx context.Context, client sdk.Client, opts r
 		MemoryMiB:        resources.memory,
 		PolicyProfile:    resources.profile,
 		Privileged:       opts.privileged,
-		Env:              envMap(withoutInjectedSecrets(resources.env)),
+		Env:              envMap(resources.env),
 		OAuthCredentials: opts.oauthCredentials,
 	})
 	if err != nil {
