@@ -466,6 +466,9 @@ func (r *Runner) secret(ctx context.Context, args []string) int {
 	case "rm", commandRemove, commandDelete, commandUnset:
 		return r.secretRemoveCommand(ctx, args[1:])
 	case "ls", commandList:
+		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
+			return r.secretListHelp()
+		}
 		return r.serviceSecretList(ctx, args[1:])
 	case "import", commandSetCustom:
 		return r.secretExtendedCommand(ctx, args)
@@ -581,6 +584,41 @@ Flags:
       --sandbox string    Scope service or registry credentials to one sandbox
   -f, --force             Delete without confirmation prompt
   -h, --help              Show this help
+`
+	if _, err := io.WriteString(r.Out, usage); err != nil {
+		r.error(err)
+		return 1
+	}
+	return 0
+}
+
+func (r *Runner) secretListHelp() int {
+	const usage = `Description:
+  List stored secrets across global and sandbox scopes. Secret values are never
+  displayed. Use --global or --sandbox to limit the inventory, and --service to
+  filter by provider.
+
+Usage:
+  rsbx secret ls [flags]
+
+Aliases:
+  ls, list
+
+Examples:
+  rsbx secret ls
+  rsbx secret ls -g
+  rsbx secret ls --sandbox my-sandbox
+  rsbx secret ls --service github
+  rsbx secret ls --json
+
+Flags:
+      --format string   Output format: table, json or yaml
+  -g, --global          Only list global secrets
+  -h, --help            Show this help
+      --json            Output in JSON format
+  -q, --quiet           Only display secret names
+      --sandbox string  Only list secrets scoped to one sandbox
+      --service string  Filter by secret service name
 `
 	if _, err := io.WriteString(r.Out, usage); err != nil {
 		r.error(err)

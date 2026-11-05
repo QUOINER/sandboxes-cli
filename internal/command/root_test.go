@@ -434,6 +434,21 @@ func TestSecretCustomFailsClosedAndImportHelpIsAvailable(t *testing.T) {
 	}
 }
 
+func TestSecretListHelpMatchesSupportedFilterSurface(t *testing.T) {
+	for _, command := range []string{"ls", "list"} {
+		var output bytes.Buffer
+		runner := &Runner{Out: &output, Err: &output}
+		if code := runner.Run(context.Background(), []string{"secret", command, "--help"}); code != 0 {
+			t.Fatalf("%s help exit=%d output=%q", command, code, output.String())
+		}
+		for _, expected := range []string{"Aliases:", "ls, list", "--global", "--sandbox", "--service", "--quiet", "--format", "--json"} {
+			if !strings.Contains(output.String(), expected) {
+				t.Errorf("%s help lacks %q: %s", command, expected, output.String())
+			}
+		}
+	}
+}
+
 type fakeClient struct {
 	registry        *fakeRegistryCredentials
 	secrets         sdk.SecretService
