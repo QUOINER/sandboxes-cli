@@ -86,8 +86,8 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 	if fs.NArg() == 1 {
 		requested = strings.ToLower(fs.Arg(0))
 		if !validServiceSecret(requested) {
-			r.error(fmt.Errorf("unknown service %q", requested))
-			return 2
+			_, _ = fmt.Fprintf(r.Err, "error: unknown service %q (available: %s)\n  try: rsbx secret import --help\n", requested, strings.Join(serviceSecretNames, ", "))
+			return 1
 		}
 	}
 	client, err := r.client()

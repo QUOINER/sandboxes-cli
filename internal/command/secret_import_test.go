@@ -260,6 +260,29 @@ func TestSecretImportReportsNoDetectedCredentialsLikeDocker(t *testing.T) {
 	}
 }
 
+func TestSecretImportUnknownServiceMatchesDockerDiagnostic(t *testing.T) {
+	var output bytes.Buffer
+	newClientCalled := false
+	runner := &Runner{
+		Out: &output, Err: &output,
+		NewClient: func(string) (sdk.Client, error) {
+			newClientCalled = true
+			return fakeClient{secrets: &fakeServiceSecrets{}}, nil
+		},
+	}
+
+	if code := runner.Run(context.Background(), []string{"secret", "import", "invalid-service", "--dry-run"}); code != 1 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	want := "error: unknown service \"invalid-service\" (available: " + strings.Join(serviceSecretNames, ", ") + ")\n  try: rsbx secret import --help"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("missing Docker-compatible error: %q", output.String())
+	}
+	if newClientCalled {
+		t.Fatal("unknown service reached the daemon")
+	}
+}
+
 func TestLastFourPreviewMasksShortValues(t *testing.T) {
 	tests := []struct {
 		value string
