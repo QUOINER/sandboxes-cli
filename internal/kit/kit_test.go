@@ -58,13 +58,6 @@ spec: {agent: codex, credentials: [{service: openai, oauth: {}}]}
 `)); err != nil {
 		t.Fatalf("omitted Docker-optional resourceHosts rejected: %v", err)
 	}
-	if _, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
-kind: Kit
-metadata: {name: openai-empty-optional-objects}
-spec: {agent: codex, credentials: [{service: openai, oauth: {tokenEndpoint: {}, sentinels: {}, credentialFile: {}, responseFields: {}}}]}
-`)); err != nil {
-		t.Fatalf("empty Docker-optional objects changed fixed-provider validation: %v", err)
-	}
 	custom := `apiVersion: rheic.dev/v1alpha1
 kind: Kit
 metadata: {name: invalid}
@@ -136,6 +129,32 @@ spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {ho
 	credential := doc.Spec.Credentials[0].OAuth
 	if credential.Sentinels != nil {
 		t.Fatalf("omitted passthrough sentinels were materialized: %+v", credential.Sentinels)
+	}
+}
+
+func TestDecodeRejectsEmptyOAuthCredentialFile(t *testing.T) {
+	_, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+kind: Kit
+metadata: {name: empty-credential-file}
+spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /token}, passthrough: true, credentialFile: {}}}]}
+`))
+	if err == nil || !strings.Contains(err.Error(), "credentialFile.path is required") {
+		t.Fatalf("empty credentialFile should be rejected like sbx: %v", err)
+	}
+}
+
+func TestDecodePreservesEmptyPassthroughOAuthMessages(t *testing.T) {
+	doc, err := Decode(strings.NewReader(`apiVersion: rheic.dev/v1alpha1
+kind: Kit
+metadata: {name: empty-passthrough-messages}
+spec: {agent: codex, credentials: [{service: fixture, oauth: {tokenEndpoint: {host: auth.example.test, path: /token}, passthrough: true, sentinels: {}, responseFields: {}}}]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oauth := doc.Spec.Credentials[0].OAuth
+	if oauth.Sentinels == nil || oauth.ResponseFields == nil || oauth.CredentialFile != nil {
+		t.Fatalf("explicit empty OAuth messages lost their presence: %+v", oauth)
 	}
 }
 

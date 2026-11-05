@@ -73,3 +73,17 @@ func TestConvertOAuthCredentialsPreservesOmittedPassthroughFields(t *testing.T) 
 		t.Fatalf("optional OAuth fields changed during conversion: %+v", got)
 	}
 }
+
+func TestConvertOAuthCredentialsPreservesExplicitEmptyMessages(t *testing.T) {
+	credentials := []kit.Credential{{Service: "fixture", OAuth: &kit.OAuthCredential{
+		TokenEndpoint: &kit.TokenEndpoint{Host: "auth.example.test", Path: "/token"}, Passthrough: true,
+		Sentinels: &kit.Sentinels{}, ResponseFields: &kit.ResponseFields{},
+	}}}
+	got, err := convertOAuthCredentials(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Sentinels == nil || got[0].ResponseFields == nil || got[0].CredentialFile != nil {
+		t.Fatalf("OAuth message presence changed during conversion: %+v", got)
+	}
+}

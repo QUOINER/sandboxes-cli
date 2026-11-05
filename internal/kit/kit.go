@@ -258,11 +258,7 @@ func validateFixedOpenAIOAuth(oauth *OAuthCredential) error {
 	if len(oauth.ResourceHosts) != 0 && (len(oauth.ResourceHosts) != 1 || oauth.ResourceHosts[0] != "api.openai.com") {
 		return errors.New("openai OAuth resourceHosts must contain only api.openai.com")
 	}
-	tokenEndpointSet := oauth.TokenEndpoint != nil && *oauth.TokenEndpoint != (TokenEndpoint{})
-	sentinelsSet := oauth.Sentinels != nil && *oauth.Sentinels != (Sentinels{})
-	credentialFileSet := oauth.CredentialFile != nil && (oauth.CredentialFile.Path != "" || oauth.CredentialFile.Template != "" || len(oauth.CredentialFile.Structure) != 0)
-	responseFieldsSet := oauth.ResponseFields != nil && *oauth.ResponseFields != (ResponseFields{})
-	if tokenEndpointSet || sentinelsSet || credentialFileSet || responseFieldsSet || oauth.Passthrough {
+	if oauth.TokenEndpoint != nil || oauth.Sentinels != nil || oauth.CredentialFile != nil || oauth.ResponseFields != nil || oauth.Passthrough {
 		return errors.New("openai OAuth kit uses a fixed daemon-managed provider; custom broker fields are unsupported")
 	}
 	return nil
@@ -303,6 +299,9 @@ func validateOAuthHosts(service string, oauth *OAuthCredential) error {
 }
 
 func validateCredentialFile(service string, file CredentialFile) error {
+	if file.Path == "" && file.Template == "" && len(file.Structure) == 0 {
+		return fmt.Errorf("kit OAuth credential %q credentialFile.path is required", service)
+	}
 	if (file.Path == "") != (file.Template == "" && len(file.Structure) == 0) {
 		return fmt.Errorf("kit OAuth credential %q credentialFile requires path and structure or template", service)
 	}
