@@ -15,7 +15,18 @@ func TestCompletionScripts(t *testing.T) {
 		if code := runner.Run(context.Background(), []string{"completion", shell}); code != 0 {
 			t.Fatalf("%s exit=%d output=%q", shell, code, out.String())
 		}
-		if !strings.Contains(out.String(), "rsbx") || !strings.Contains(out.String(), "create") {
+		expectedCompletions := []string{"rsbx", "create", "remove", "unset"}
+		if shell == "fish" {
+			expectedCompletions = append(expectedCompletions, "-l token", "-s t", "-l all")
+		} else {
+			expectedCompletions = append(expectedCompletions, "--token", "-t", "--all")
+		}
+		for _, expected := range expectedCompletions {
+			if !strings.Contains(out.String(), expected) {
+				t.Errorf("%s output lacks %q: %s", shell, expected, out.String())
+			}
+		}
+		if t.Failed() {
 			t.Fatalf("%s output=%q", shell, out.String())
 		}
 	}
@@ -31,6 +42,18 @@ func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
 		if !slices.Contains(completionSubcommands[secretCommand], expected) {
 			t.Errorf("secret %s command is missing from completion tree", expected)
 		}
+	}
+}
+
+func TestFishCompletionUsesShortFlagSyntax(t *testing.T) {
+	script := fishCompletionScript()
+	for _, expected := range []string{"-l token", "-s t", "-s f", "-s g", "-s q"} {
+		if !strings.Contains(script, expected) {
+			t.Errorf("fish completion lacks %q", expected)
+		}
+	}
+	if strings.Contains(script, "-l t\n") || strings.Contains(script, "-l f\n") {
+		t.Fatalf("short flag is emitted as a long flag: %s", script)
 	}
 }
 

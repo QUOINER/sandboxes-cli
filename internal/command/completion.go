@@ -161,7 +161,11 @@ func fishCompletionScript() string {
 	}
 	for _, name := range sortedKeys(completionTree) {
 		for _, flag := range completionTree[name] {
-			fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -l %s\n", name, strings.TrimLeft(flag, "-"))
+			if strings.HasPrefix(flag, "--") {
+				fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -l %s\n", name, strings.TrimPrefix(flag, "--"))
+			} else if len(flag) == 2 && strings.HasPrefix(flag, "-") {
+				fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -s %s\n", name, strings.TrimPrefix(flag, "-"))
+			}
 		}
 		for _, sub := range completionSubcommands[name] {
 			fmt.Fprintf(&b, "complete -c rsbx -n '__fish_seen_subcommand_from %s' -a %s\n", name, sub)
