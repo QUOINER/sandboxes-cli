@@ -237,6 +237,29 @@ func TestSecretImportReportsMissingEnvironmentVariableLikeDocker(t *testing.T) {
 	}
 }
 
+func TestSecretImportReportsNoDetectedCredentialsLikeDocker(t *testing.T) {
+	for _, names := range serviceEnvVars {
+		for _, name := range names {
+			t.Setenv(name, "")
+		}
+	}
+	for _, args := range [][]string{
+		{"secret", "import"},
+		{"secret", "import", "--dry-run"},
+	} {
+		client := fakeClient{secrets: &fakeServiceSecrets{}}
+		var output bytes.Buffer
+		runner := &Runner{Out: &output, Err: &output, NewClient: func(string) (sdk.Client, error) { return client, nil }}
+		if code := runner.Run(context.Background(), args); code != 0 {
+			t.Fatalf("%v exit=%d output=%q", args, code, output.String())
+		}
+		want := "No credential env vars detected on the host. Set e.g. OPENAI_API_KEY in your shell and re-run, or use `rsbx secret set` to enter a value directly."
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("%v missing Docker-compatible diagnostic: %q", args, output.String())
+		}
+	}
+}
+
 func TestLastFourPreviewMasksShortValues(t *testing.T) {
 	tests := []struct {
 		value string

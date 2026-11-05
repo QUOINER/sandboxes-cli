@@ -182,8 +182,12 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 	if detected && !*dryRun {
 		_, _ = fmt.Fprintf(r.Out, "  %d secrets imported · %d skipped\n", imported, skipped)
 	}
-	if requested != "" && !detected {
-		_, _ = fmt.Fprintf(r.Err, "No env var detected for %q on the host. Either the env var isn't set, or %q isn't a known credential service.\n", requested, requested)
+	if !detected {
+		if requested != "" {
+			_, _ = fmt.Fprintf(r.Err, "No env var detected for %q on the host. Either the env var isn't set, or %q isn't a known credential service.\n", requested, requested)
+		} else {
+			_, _ = fmt.Fprintln(r.Err, "No credential env vars detected on the host. Set e.g. OPENAI_API_KEY in your shell and re-run, or use `rsbx secret set` to enter a value directly.")
+		}
 	}
 	return 0
 }
