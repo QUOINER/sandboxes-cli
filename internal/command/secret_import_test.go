@@ -52,11 +52,11 @@ func TestSecretImportUsesAtomicCreateUnlessForceIsExplicit(t *testing.T) {
 	}
 
 	output.Reset()
-	if code := runner.Run(context.Background(), []string{"secret", "import", "github", "--force"}); code != 0 {
+	if code := runner.Run(context.Background(), []string{"secret", "import", "github", "-f"}); code != 0 {
 		t.Fatalf("force exit=%d output=%q", code, output.String())
 	}
-	if secrets.createCalls != 1 || secrets.service != "github" {
-		t.Fatalf("--force did not use explicit overwrite path: create calls=%d secret=%+v", secrets.createCalls, secrets)
+	if secrets.createCalls != 1 || secrets.setCalls != 1 || secrets.service != "github" {
+		t.Fatalf("-f did not use explicit overwrite path: create calls=%d set calls=%d secret=%+v", secrets.createCalls, secrets.setCalls, secrets)
 	}
 }
 

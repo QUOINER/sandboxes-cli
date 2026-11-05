@@ -64,6 +64,7 @@ func (r *Runner) serviceSecretImport(ctx context.Context, args []string) int {
 	fs.SetOutput(r.Err)
 	all := fs.Bool("all", false, "import every detected variable without prompting")
 	force := fs.Bool("force", false, "overwrite existing secrets")
+	fs.BoolVar(force, "f", false, "overwrite existing secrets")
 	dryRun := fs.Bool("dry-run", false, "show what would be imported")
 	if code, done := r.parseFlagsOrFail("secret import", fs, args); done {
 		return code

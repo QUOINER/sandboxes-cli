@@ -17,6 +17,7 @@ type fakeServiceSecrets struct {
 	value       []byte
 	items       []sdk.ServiceSecret
 	listErr     error
+	setCalls    int
 	createCalls int
 	createErr   error
 	removed     []sdk.ServiceSecret
@@ -115,6 +116,7 @@ func TestSecretRemoveOpenAIReportsPartialOAuthRevocationFailure(t *testing.T) {
 }
 
 func (f *fakeServiceSecrets) Set(_ context.Context, service string, scope sdk.SecretScope, name string, value []byte) (sdk.ServiceSecret, error) {
+	f.setCalls++
 	f.service, f.scope, f.name = service, scope, name
 	f.value = append(f.value[:0], value...)
 	return sdk.ServiceSecret{Service: service, Scope: scope, SandboxName: name}, nil
