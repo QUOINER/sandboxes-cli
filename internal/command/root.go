@@ -33,6 +33,9 @@ const (
 	commandReset      = "reset"
 	stateUnavailable  = "unavailable"
 	commandList       = "list"
+	commandDelete     = "delete"
+	commandRemove     = "remove"
+	commandUnset      = "unset"
 	commandSet        = "set"
 	schemeHTTPS       = "https"
 	reasonDefaultDeny = "default deny"
@@ -138,7 +141,7 @@ func (r *Runner) Run(ctx context.Context, args []string) int {
 		return r.start(ctx, rest[1:])
 	case stopCommand:
 		return r.stop(ctx, rest[1:])
-	case "rm", "delete":
+	case "rm", commandDelete:
 		return r.remove(ctx, rest[1:])
 	case "wait":
 		return r.wait(ctx, rest[1:])
@@ -466,7 +469,7 @@ func (r *Runner) secret(ctx context.Context, args []string) int {
 			return r.registrySet(ctx, args[1:])
 		}
 		return r.serviceSecretSet(ctx, args[1:])
-	case "rm", "remove", "delete", "unset":
+	case "rm", commandRemove, commandDelete, commandUnset:
 		if hasFlag(args[1:], "--help") || hasFlag(args[1:], "-h") {
 			return r.secretRemoveHelp()
 		}
@@ -477,7 +480,7 @@ func (r *Runner) secret(ctx context.Context, args []string) int {
 			return r.registryRemove(ctx, args[1:])
 		}
 		return r.serviceSecretRemove(ctx, args[1:])
-	case "ls", "list":
+	case "ls", commandList:
 		return r.serviceSecretList(ctx, args[1:])
 	case "import":
 		return r.serviceSecretImport(ctx, args[1:])

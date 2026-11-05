@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -20,13 +21,17 @@ func TestCompletionScripts(t *testing.T) {
 	}
 }
 
-func TestSecretOAuthFlagIsInCompletionTree(t *testing.T) {
-	for _, flag := range completionTree[secretCommand] {
-		if flag == "--oauth" {
-			return
+func TestSecretFlagsAndAliasesAreInCompletionTree(t *testing.T) {
+	for _, expected := range []string{"--oauth", "--token", "-t", "--force", "-f", "--all", "--all-sandboxes", "--sandbox", "--registry", "--global", "--quiet", "--service"} {
+		if !slices.Contains(completionTree[secretCommand], expected) {
+			t.Errorf("secret %s flag is missing from completion tree", expected)
 		}
 	}
-	t.Fatal("secret --oauth flag is missing from completion tree")
+	for _, expected := range []string{"ls", "list", "set", "rm", "remove", "delete", "unset"} {
+		if !slices.Contains(completionSubcommands[secretCommand], expected) {
+			t.Errorf("secret %s command is missing from completion tree", expected)
+		}
+	}
 }
 
 func TestCompletionRejectsUnknownShell(t *testing.T) {

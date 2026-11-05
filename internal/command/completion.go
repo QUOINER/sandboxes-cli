@@ -25,7 +25,7 @@ var completionTree = map[string][]string{
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {forceFlag},
-	secretCommand:     {"--registry", usernameFlag, "--password-stdin", "--all-sandboxes", sandboxFlag, oauthFlag},
+	secretCommand:     {"--registry", usernameFlag, "--password-stdin", "--all-sandboxes", "--all", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", "--command", "--global", "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	completionCommand: {},
 	"help":            {},
@@ -33,7 +33,7 @@ var completionTree = map[string][]string{
 
 var completionSubcommands = map[string][]string{
 	policyCommand:     {"ls", commandInspect, actionAllow, actionDeny, "rm", "check", networkKeyword},
-	secretCommand:     {"ls", commandSet, "rm"},
+	secretCommand:     {"ls", commandList, commandSet, "rm", commandRemove, commandDelete, commandUnset},
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 }
 
