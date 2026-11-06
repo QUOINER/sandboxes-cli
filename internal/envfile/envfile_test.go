@@ -15,8 +15,8 @@ func TestLoadMergesFilesAndDiscardsEnvironmentValues(t *testing.T) {
 	if err := os.Mkdir(secondDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeEnvFile(t, first, "schemaVersion: \"1\"\nname: before\nagent: shell\nworkspace: work\nenv:\n  TOKEN: secret-one\n  SHARED: old\nsandboxOptions:\n  cpus: 2\n")
-	writeEnvFile(t, filepath.Join(secondDir, "sbxenv.yaml"), "schemaVersion: \"1\"\nname: after\nworkspace:\n  path: override\nadditionalWorkspaces:\n  - path: data\n    readOnly: true\nenv:\n  SHARED: secret-two\n  SECOND: value\nsandboxOptions:\n  memory: 2g\n")
+	writeEnvFile(t, first, "schemaVersion: \"1\"\nname: before\nagent: shell\nworkspace: work\nports:\n  - sandbox: 3000\n    host: 4300\n    protocol: tcp\nenv:\n  TOKEN: secret-one\n  SHARED: old\nsandboxOptions:\n  cpus: 2\n")
+	writeEnvFile(t, filepath.Join(secondDir, "sbxenv.yaml"), "schemaVersion: \"1\"\nname: after\nworkspace:\n  path: override\nadditionalWorkspaces:\n  - path: data\n    readOnly: true\nports:\n  - sandbox: 9222\n    hostIP: 127.0.0.1\nenv:\n  SHARED: secret-two\n  SECOND: value\nsandboxOptions:\n  memory: 2g\n")
 
 	plan, err := Load([]string{first, secondDir})
 	if err != nil {
@@ -36,6 +36,9 @@ func TestLoadMergesFilesAndDiscardsEnvironmentValues(t *testing.T) {
 	}
 	if plan.CPUs == nil || *plan.CPUs != 2 || plan.Memory != "2g" {
 		t.Fatalf("resources = CPUs %v, memory %q", plan.CPUs, plan.Memory)
+	}
+	if len(plan.Ports) != 2 || plan.Ports[0].Sandbox != 3000 || plan.Ports[0].Host == nil || *plan.Ports[0].Host != 4300 || plan.Ports[0].Protocol != "tcp" || plan.Ports[1].Sandbox != 9222 || plan.Ports[1].Host != nil || plan.Ports[1].HostIP != "127.0.0.1" {
+		t.Fatalf("ports = %#v", plan.Ports)
 	}
 }
 
@@ -91,6 +94,66 @@ func TestLoadDefaultAllowsMissingUserDefaultsButRequiresProjectFile(t *testing.T
 	}
 }
 
+func TestLoadExpandsProjectAndFileDirectoryReferences(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "project")
+	baseDir := filepath.Join(root, "defaults")
+	if err := os.Mkdir(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(baseDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(baseDir, "base.yaml")
+	project := filepath.Join(projectDir, "sbxenv.yaml")
+	writeEnvFile(t, base, "schemaVersion: \"1\"\nagent: shell\nworkspace: \"${{ env.projectDir }}/base\"\nadditionalWorkspaces:\n  - path: \"${{ env.fileDir }}/shared\"\n")
+	writeEnvFile(t, project, "schemaVersion: \"1\"\nworkspace: \"${{ env.fileDir }}/src\"\n")
+
+	plan, err := Load([]string{project, base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(projectDir, "base"); plan.Workspace != want {
+		t.Fatalf("workspace = %q, want %q", plan.Workspace, want)
+	}
+	if len(plan.AdditionalWorkspaces) != 1 {
+		t.Fatalf("additional workspaces = %#v", plan.AdditionalWorkspaces)
+	}
+	if want := filepath.Join(baseDir, "shared"); plan.AdditionalWorkspaces[0].Path != want {
+		t.Fatalf("additional workspace = %q, want %q", plan.AdditionalWorkspaces[0].Path, want)
+	}
+}
+
+func TestLoadDefaultExpandsProjectDirectoryInHomeDefaults(t *testing.T) {
+	root := t.TempDir()
+	homeDir := filepath.Join(root, "home")
+	workingDir := filepath.Join(root, "project")
+	if err := os.Mkdir(homeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(workingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeEnvFile(t, filepath.Join(homeDir, ".sbxenv.yaml"), "schemaVersion: \"1\"\nagent: shell\nworkspace: \"${{ env.projectDir }}\"\n")
+	writeEnvFile(t, filepath.Join(workingDir, "sbxenv.yaml"), "schemaVersion: \"1\"\n")
+
+	plan, err := LoadDefault(homeDir, workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Workspace != workingDir {
+		t.Fatalf("workspace = %q, want project directory %q", plan.Workspace, workingDir)
+	}
+}
+
+func TestLoadRejectsUnknownDirectoryReferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nworkspace: \"${{ env.unknown }}\"\n")
+	if _, err := Load([]string{path}); err == nil {
+		t.Fatal("unknown environment reference accepted")
+	}
+}
+
 func TestLoadRejectsUnsupportedFieldsAndMalformedDocuments(t *testing.T) {
 	cases := map[string]string{
 		"unknown field":           "schemaVersion: \"1\"\nagent: shell\nsecretSource: host\n",
@@ -100,6 +163,10 @@ func TestLoadRejectsUnsupportedFieldsAndMalformedDocuments(t *testing.T) {
 		"invalid cpu":             "schemaVersion: \"1\"\nagent: shell\nsandboxOptions:\n  cpus: 0\n",
 		"invalid memory":          "schemaVersion: \"1\"\nagent: shell\nsandboxOptions:\n  memory: 1k\n",
 		"duplicate workspace key": "schemaVersion: \"1\"\nagent: shell\nworkspace:\n  path: a\n  path: b\n",
+		"missing sandbox port":    "schemaVersion: \"1\"\nagent: shell\nports:\n  - host: 3000\n",
+		"invalid port protocol":   "schemaVersion: \"1\"\nagent: shell\nports:\n  - sandbox: 3000\n    protocol: sctp\n",
+		"invalid host ip":         "schemaVersion: \"1\"\nagent: shell\nports:\n  - sandbox: 3000\n    hostIP: example.com\n",
+		"out of range port":       "schemaVersion: \"1\"\nagent: shell\nports:\n  - sandbox: 65536\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

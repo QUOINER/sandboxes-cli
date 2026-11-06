@@ -11,7 +11,7 @@ import (
 
 func TestEnvironmentPlanIsReadOnlyAndRedactsValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
-	body := "schemaVersion: \"1\"\nagent: shell\nenv:\n  API_TOKEN: very-secret-value\n"
+	body := "schemaVersion: \"1\"\nagent: shell\nports:\n  - sandbox: 3000\n    host: 4300\n    protocol: tcp4\nenv:\n  API_TOKEN: very-secret-value\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestEnvironmentPlanIsReadOnlyAndRedactsValues(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "API_TOKEN=<redacted>") || strings.Contains(stdout.String(), "very-secret-value") {
+	if !strings.Contains(stdout.String(), "API_TOKEN=<redacted>") || strings.Contains(stdout.String(), "very-secret-value") || !strings.Contains(stdout.String(), "sandbox 3000 -> host 4300 (tcp4, hostIP default)") {
 		t.Fatalf("unexpected preview output: %s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "daemon state not queried") {

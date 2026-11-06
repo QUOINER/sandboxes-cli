@@ -5,6 +5,7 @@ package envfile
 import (
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,6 +23,7 @@ const (
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+var directoryReference = regexp.MustCompile(`\$\{\{\s*env\.([A-Za-z][A-Za-z0-9]*)\s*\}\}`)
 
 // ValidateName checks a name before the CLI applies a command-line override.
 func ValidateName(name string) error {
@@ -45,6 +47,7 @@ type Plan struct {
 	Agent                string
 	Workspace            string
 	AdditionalWorkspaces []Workspace
+	Ports                []Port
 	EnvironmentKeys      []string
 	CPUs                 *uint32
 	Memory               string
@@ -56,6 +59,7 @@ type document struct {
 	Agent                string            `yaml:"agent"`
 	Workspace            workspaceValue    `yaml:"workspace"`
 	AdditionalWorkspaces []workspaceMount  `yaml:"additionalWorkspaces"`
+	Ports                []portMapping     `yaml:"ports"`
 	Env                  map[string]string `yaml:"env"`
 	SandboxOptions       sandboxOptions    `yaml:"sandboxOptions"`
 }
@@ -97,6 +101,21 @@ type workspaceMount struct {
 	ReadOnly bool   `yaml:"readOnly"`
 }
 
+// Port is a sandbox port declaration shown in the static environment preview.
+type Port struct {
+	Sandbox  uint16
+	Host     *uint16
+	Protocol string
+	HostIP   string
+}
+
+type portMapping struct {
+	Sandbox  *uint16 `yaml:"sandbox"`
+	Host     *uint16 `yaml:"host"`
+	Protocol string  `yaml:"protocol"`
+	HostIP   string  `yaml:"hostIP"`
+}
+
 type sandboxOptions struct {
 	CPUs   *uint32 `yaml:"cpus"`
 	Memory string  `yaml:"memory"`
@@ -108,6 +127,14 @@ func Load(paths []string) (Plan, error) {
 	if len(paths) == 0 {
 		return Plan{}, errors.New("an explicit environment file or directory is required")
 	}
+	firstFile, err := resolveFile(paths[0])
+	if err != nil {
+		return Plan{}, err
+	}
+	return load(paths, filepath.Dir(firstFile))
+}
+
+func load(paths []string, projectDir string) (Plan, error) {
 	var plan Plan
 	for _, path := range paths {
 		filePath, err := resolveFile(path)
@@ -121,7 +148,7 @@ func Load(paths []string) (Plan, error) {
 		if err := doc.validate(); err != nil {
 			return Plan{}, err
 		}
-		plan, err = mergeDocument(plan, doc, filePath)
+		plan, err = mergeDocument(plan, doc, filePath, projectDir)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -151,10 +178,14 @@ func LoadDefault(homeDir, workingDir string) (Plan, error) {
 		return Plan{}, errors.New("inspect user environment defaults")
 	}
 	paths = append(paths, workingDir)
-	return Load(paths)
+	projectDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return Plan{}, errors.New("resolve default environment paths")
+	}
+	return load(paths, filepath.Clean(projectDir))
 }
 
-func mergeDocument(plan Plan, doc document, filePath string) (Plan, error) {
+func mergeDocument(plan Plan, doc document, filePath, projectDir string) (Plan, error) {
 	if doc.Name != "" {
 		plan.Name = doc.Name
 	}
@@ -162,18 +193,26 @@ func mergeDocument(plan Plan, doc document, filePath string) (Plan, error) {
 		plan.Agent = doc.Agent
 	}
 	if doc.Workspace.Path != "" {
-		resolved, err := resolveWorkspace(filePath, doc.Workspace.Path)
+		resolved, err := resolveWorkspace(filePath, doc.Workspace.Path, projectDir)
 		if err != nil {
 			return Plan{}, err
 		}
 		plan.Workspace = resolved
 	}
 	for _, mount := range doc.AdditionalWorkspaces {
-		resolved, err := resolveWorkspace(filePath, mount.Path)
+		resolved, err := resolveWorkspace(filePath, mount.Path, projectDir)
 		if err != nil {
 			return Plan{}, err
 		}
 		plan.AdditionalWorkspaces = append(plan.AdditionalWorkspaces, Workspace{Path: resolved, ReadOnly: mount.ReadOnly})
+	}
+	for _, port := range doc.Ports {
+		var host *uint16
+		if port.Host != nil {
+			value := *port.Host
+			host = &value
+		}
+		plan.Ports = append(plan.Ports, Port{Sandbox: *port.Sandbox, Host: host, Protocol: port.Protocol, HostIP: port.HostIP})
 	}
 	plan.EnvironmentKeys = mergeEnvironmentKeys(plan.EnvironmentKeys, doc.Env)
 	if doc.SandboxOptions.CPUs != nil {
@@ -214,7 +253,30 @@ func (d document) validate() error {
 	if err := validateEnvironment(d.Env); err != nil {
 		return err
 	}
+	if err := validatePorts(d.Ports); err != nil {
+		return err
+	}
 	return validateOptions(d.SandboxOptions)
+}
+
+func validatePorts(ports []portMapping) error {
+	for _, port := range ports {
+		if port.Sandbox == nil || *port.Sandbox == 0 {
+			return errors.New("environment port requires a sandbox port from 1 through 65535")
+		}
+		if port.Host != nil && *port.Host == 0 {
+			return errors.New("environment host port must be from 1 through 65535")
+		}
+		switch port.Protocol {
+		case "", "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
+		default:
+			return errors.New("environment port protocol is invalid")
+		}
+		if port.HostIP != "" && net.ParseIP(port.HostIP) == nil {
+			return errors.New("environment port hostIP must be an IP address")
+		}
+	}
+	return nil
 }
 
 func validateIdentifiers(d document) error {
@@ -373,7 +435,11 @@ func validateYAMLTree(root *yaml.Node) error {
 	return nil
 }
 
-func resolveWorkspace(filePath, path string) (string, error) {
+func resolveWorkspace(filePath, path, projectDir string) (string, error) {
+	path, err := expandDirectoryReferences(path, filepath.Dir(filePath), projectDir)
+	if err != nil {
+		return "", err
+	}
 	if filepath.IsAbs(path) {
 		return filepath.Clean(path), nil
 	}
@@ -382,4 +448,34 @@ func resolveWorkspace(filePath, path string) (string, error) {
 		return "", errors.New("resolve workspace path")
 	}
 	return filepath.Clean(resolved), nil
+}
+
+func expandDirectoryReferences(value, fileDir, projectDir string) (string, error) {
+	var expansionErr error
+	expanded := directoryReference.ReplaceAllStringFunc(value, func(reference string) string {
+		if expansionErr != nil {
+			return reference
+		}
+		match := directoryReference.FindStringSubmatch(reference)
+		if len(match) != 2 {
+			expansionErr = errors.New("invalid environment directory reference")
+			return reference
+		}
+		switch match[1] {
+		case "projectDir":
+			return projectDir
+		case "fileDir":
+			return fileDir
+		default:
+			expansionErr = errors.New("unsupported environment directory reference")
+			return reference
+		}
+	})
+	if expansionErr != nil {
+		return "", expansionErr
+	}
+	if strings.Contains(expanded, "${{") {
+		return "", errors.New("unsupported environment directory reference")
+	}
+	return expanded, nil
 }

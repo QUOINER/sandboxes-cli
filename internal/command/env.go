@@ -10,9 +10,11 @@ import (
 	"github.com/rheic/sandboxes-cli/internal/envfile"
 )
 
+const previewDefault = "default"
+
 func (r *Runner) environment(args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env plan [PATH...]\n\nCreate a static, read-only preview from the current directory and optional user defaults, or from explicit sbxenv.yaml paths. Explicit paths skip user defaults.\nNo sandbox is created or changed; environment values are never displayed.\nApply, create, run, exec, and rm are unsupported.\n")
+		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env plan [PATH...]\n\nCreate a static, read-only preview from the current directory and optional user defaults, or from explicit sbxenv.yaml paths. Explicit paths skip user defaults.\nWorkspace paths and declared ports are previewed; no sandbox is created, changed, or queried. Environment values are never displayed.\nApply, create, run, exec, and rm are unsupported.\n")
 		return 0
 	}
 	if args[0] != "plan" {
@@ -23,7 +25,7 @@ func (r *Runner) environment(args []string) int {
 	fs.SetOutput(r.Err)
 	name := fs.String("name", "", "override the environment sandbox name")
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\n  --name NAME  override the sandbox name\n\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
+		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nWorkspace paths expand env.projectDir and env.fileDir references. Declared ports are validated and displayed without opening sockets.\n  --name NAME  override the sandbox name\n\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
 	}
 	if err := fs.Parse(reorderFlagArgs(args[1:], map[string]bool{"--name": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -52,6 +54,7 @@ func (r *Runner) environment(args []string) int {
 		}
 		fmt.Fprintf(&out, "  %q (%s)\n", workspace.Path, mode)
 	}
+	writePortPreview(&out, plan.Ports)
 	fmt.Fprintf(&out, "Environment keys: %d\n", len(plan.EnvironmentKeys))
 	for _, key := range plan.EnvironmentKeys {
 		fmt.Fprintf(&out, "  %s=<redacted>\n", key)
@@ -67,6 +70,25 @@ func (r *Runner) environment(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func writePortPreview(out *strings.Builder, ports []envfile.Port) {
+	fmt.Fprintf(out, "Ports: %d\n", len(ports))
+	for _, port := range ports {
+		host := "ephemeral"
+		if port.Host != nil {
+			host = fmt.Sprintf("%d", *port.Host)
+		}
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = previewDefault
+		}
+		hostIP := port.HostIP
+		if hostIP == "" {
+			hostIP = previewDefault
+		}
+		fmt.Fprintf(out, "  sandbox %d -> host %s (%s, hostIP %s)\n", port.Sandbox, host, protocol, hostIP)
+	}
 }
 
 func applyEnvironmentName(plan *envfile.Plan, name string) error {
