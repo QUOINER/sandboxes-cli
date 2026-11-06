@@ -512,7 +512,7 @@ func (r *Runner) policyInit(ctx context.Context, args []string) int {
 		return 2
 	}
 	profile := args[0]
-	if profile != "allow-all" && profile != "balanced" && profile != "deny-all" {
+	if profile != "allow-all" && profile != policyProfileBalanced && profile != policyProfileDenyAll {
 		_, _ = fmt.Fprintln(r.Err, "profile must be allow-all, balanced or deny-all")
 		return 2
 	}

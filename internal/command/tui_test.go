@@ -63,7 +63,7 @@ func (s *dashboardTestScreen) text() string {
 
 func TestDrawDashboardShowsRHEICBrandAndSandbox(t *testing.T) {
 	screen := newDashboardTestScreen(100, 24)
-	drawDashboard(screen, dashboardModel{
+	drawDashboard(screen, &dashboardModel{
 		items: []sdk.Sandbox{{Name: "brand-check", ID: "sbx_test", State: "running", Agent: "shell", Image: "alpine:latest", Workspace: "/workspace"}},
 	})
 
@@ -77,7 +77,7 @@ func TestDrawDashboardShowsRHEICBrandAndSandbox(t *testing.T) {
 
 func TestDrawDashboardHandlesSmallTerminal(t *testing.T) {
 	screen := newDashboardTestScreen(32, 10)
-	drawDashboard(screen, dashboardModel{})
+	drawDashboard(screen, &dashboardModel{})
 	if output := screen.text(); !strings.Contains(output, "Resize terminal") {
 		t.Fatalf("small terminal message missing from %q", output)
 	}
