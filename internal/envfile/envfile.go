@@ -596,6 +596,7 @@ func interpolateScalar(node *yaml.Node, values map[string]string, fileDir, proje
 }
 
 func validateEnvironmentReferenceSyntax(value string, matches [][]int) error {
+	matchIndex := 0
 	for offset := 0; offset < len(value); {
 		relative := strings.Index(value[offset:], "${{")
 		if relative < 0 {
@@ -603,19 +604,16 @@ func validateEnvironmentReferenceSyntax(value string, matches [][]int) error {
 		}
 		start := offset + relative
 		if start > 0 && value[start-1] == '$' {
+			if matchIndex < len(matches) && matches[matchIndex][0] == start {
+				matchIndex++
+			}
 			offset = start + 3
 			continue
 		}
-		matched := false
-		for _, match := range matches {
-			if match[0] == start {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		if matchIndex >= len(matches) || matches[matchIndex][0] != start {
 			return errors.New("unsupported environment reference")
 		}
+		matchIndex++
 		offset = start + 3
 	}
 	return nil
