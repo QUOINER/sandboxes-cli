@@ -209,11 +209,13 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.template(args), true
 	case commandAgents:
 		return r.agents(args), true
+	case "env":
+		return r.environment(args), true
 	case commandReset:
 		return r.reset(ctx, args), true
 	case "tui":
 		return r.tui(ctx, args), true
-	case "volume", "env", "mcp", "move", "ttl", "setup", "skills":
+	case "volume", "mcp", "move", "ttl", "setup", "skills":
 		return r.unsupportedFamily(name), true
 	case completionCommand:
 		return r.completion(args), true
@@ -856,7 +858,6 @@ func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 func (r *Runner) unsupportedFamily(name string) int {
 	reasons := map[string]string{
 		"volume": "persistent volumes are cloud-only in this build",
-		"env":    "declarative sbxenv files are not implemented",
 		"mcp":    "the MCP gateway is not implemented",
 		"move":   "cloud move is unavailable without a tenant",
 		"ttl":    "cloud TTL is unavailable without a tenant",
@@ -1800,14 +1801,18 @@ Sandbox commands:
   run, attach, create, exec, cp, ls, get, start, stop, rm, prune, wait, ports
 
 Management commands:
-  agents, daemon, diagnose, login, logout, policy, reset, secret, settings, tui
+  agents, daemon, diagnose, env, login, logout, policy, reset, secret, settings, tui
 
 Extensions:
   kit       Inspect local kit files; registry kits and builders are unavailable
   template  List and inspect built-in templates
 
 Unsupported Docker Sandboxes commands:
+<<<<<<< HEAD
   env, mcp, move, setup, skills, ttl, volume
+=======
+  agents, mcp, move, setup, skills, ttl, volume
+>>>>>>> 828ad16 (Implement static environment plan preview)
 
 Flags:
       --socket PATH  Local daemon endpoint
