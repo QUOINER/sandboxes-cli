@@ -19,6 +19,10 @@ Open the RHEIC sandbox dashboard.
 
 Keys:
   ↑/↓ or j/k  select a sandbox
+  n            new sandbox (create flow)
+  s / x        start / stop the selected sandbox
+  d            remove the selected sandbox (asks first)
+  a            attach hint for the selected sandbox
   r            refresh now
   q or Esc     quit
 `
@@ -55,10 +59,14 @@ type dashboardScreen interface {
 }
 
 type dashboardModel struct {
-	items    []sdk.Sandbox
-	selected int
-	updated  time.Time
-	err      string
+	items         []sdk.Sandbox
+	selected      int
+	updated       time.Time
+	err           string
+	mode          dashboardMode
+	form          createFormModel
+	pendingCreate sdk.CreateRequest
+	notice        string
 }
 
 func (r *Runner) tui(ctx context.Context, args []string) int {
@@ -115,8 +123,8 @@ func parseTUIOptions(args []string) (time.Duration, bool, error) {
 func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client, refreshEvery time.Duration) int {
 	defer screen.Fini()
 	screen.SetTitle("RHEIC | Sandboxes")
-	model := dashboardModel{}
-	refreshDashboard(ctx, client, &model)
+	model := &dashboardModel{}
+	refreshDashboard(ctx, client, model)
 	drawDashboard(screen, model)
 
 	done := make(chan struct{})
@@ -131,9 +139,9 @@ func runDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client
 		case <-ctx.Done():
 			return 0
 		case <-ticker.C:
-			refreshAndDrawDashboard(ctx, screen, client, &model)
+			refreshAndDrawDashboard(ctx, screen, client, model)
 		case ev, ok := <-events:
-			if handleDashboardEvent(ev, ok, screen, client, ctx, &model) {
+			if handleDashboardEvent(ev, ok, screen, client, ctx, model) {
 				return 0
 			}
 		}
@@ -173,7 +181,7 @@ func forwardDashboardEvents(done, screenStopped <-chan struct{}, eventQueue <-ch
 
 func refreshAndDrawDashboard(ctx context.Context, screen dashboardScreen, client sdk.Client, model *dashboardModel) {
 	refreshDashboard(ctx, client, model)
-	drawDashboard(screen, *model)
+	drawDashboard(screen, model)
 }
 
 func handleDashboardEvent(ev tcell.Event, ok bool, screen dashboardScreen, client sdk.Client, ctx context.Context, model *dashboardModel) bool {
@@ -183,17 +191,50 @@ func handleDashboardEvent(ev tcell.Event, ok bool, screen dashboardScreen, clien
 	switch event := ev.(type) {
 	case *tcell.EventResize:
 		screen.Sync()
-		drawDashboard(screen, *model)
+		drawDashboard(screen, model)
 	case *tcell.EventKey:
 		if dashboardKey(event, model, ctx, client) {
 			return true
 		}
-		drawDashboard(screen, *model)
+		drawDashboard(screen, model)
 	}
 	return false
 }
 
 func dashboardKey(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
+	switch model.mode {
+	case modeCreate:
+		if dashboardKeyInCreate(event, model) {
+			model.mode = modeList
+			if model.pendingCreate.Name != "" {
+				submitCreate(ctx, client, model)
+				model.pendingCreate = sdk.CreateRequest{}
+			}
+		}
+		return false
+	case modeConfirmDelete:
+		return dashboardKeyConfirmDelete(event, model, ctx, client)
+	}
+	return dashboardKeyList(event, model, ctx, client)
+}
+
+// dashboardKeyConfirmDelete handles the delete confirmation prompt.
+func dashboardKeyConfirmDelete(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
+	if event.Key() == tcell.KeyEscape || event.Str() == "n" || event.Str() == "N" {
+		model.mode = modeList
+		model.notice = "delete canceled"
+		return false
+	}
+	if event.Str() == "y" || event.Str() == "Y" {
+		model.mode = modeList
+		dashboardAction(ctx, client, model, "rm")
+	}
+	return false
+}
+
+// dashboardKeyList handles keys in the sandbox list mode and reports whether
+// the dashboard should quit.
+func dashboardKeyList(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
 	switch {
 	case event.Key() == tcell.KeyEscape || event.Str() == "q" || event.Str() == "Q":
 		return true
@@ -207,6 +248,31 @@ func dashboardKey(event *tcell.EventKey, model *dashboardModel, ctx context.Cont
 		}
 	case event.Str() == "r" || event.Str() == "R":
 		refreshDashboard(ctx, client, model)
+	default:
+		return dashboardKeyAction(event, model, ctx, client)
+	}
+	return false
+}
+
+// dashboardKeyAction handles single-letter list actions (new, start, stop,
+// remove, attach hint).
+func dashboardKeyAction(event *tcell.EventKey, model *dashboardModel, ctx context.Context, client sdk.Client) bool {
+	switch event.Str() {
+	case "n", "N":
+		model.mode = modeCreate
+		model.form = newCreateFormModel()
+	case "s", "S":
+		dashboardAction(ctx, client, model, "start")
+	case "x", "X":
+		dashboardAction(ctx, client, model, "stop")
+	case "d", "D":
+		if len(model.items) > 0 {
+			model.mode = modeConfirmDelete
+		}
+	case "a", "A":
+		if len(model.items) > 0 {
+			model.notice = "attach: run rsbx attach " + model.items[model.selected].Name + " from a shell"
+		}
 	}
 	return false
 }
@@ -227,7 +293,7 @@ func refreshDashboard(ctx context.Context, client sdk.Client, model *dashboardMo
 	}
 }
 
-func drawDashboard(screen dashboardScreen, model dashboardModel) {
+func drawDashboard(screen dashboardScreen, model *dashboardModel) {
 	width, height := screen.Size()
 	background := tcell.StyleDefault.Foreground(brandLavender).Background(brandBackground)
 	primary := tcell.StyleDefault.Foreground(brandLavender).Background(brandBackground)
@@ -284,6 +350,12 @@ func drawDashboard(screen dashboardScreen, model dashboardModel) {
 			drawText(screen, detailX, 12, "Start one with rsbx run", muted, width-detailX-2)
 		}
 	}
+	drawDashboardFooter(screen, model, width, height, accent, muted, warm)
+	screen.Show()
+}
+
+// drawDashboardFooter renders the status, notice, mode overlay and key hints.
+func drawDashboardFooter(screen dashboardScreen, model *dashboardModel, width, height int, accent, muted, warm tcell.Style) {
 	if model.err != "" {
 		drawText(screen, 3, height-3, "DAEMON  "+clipCell(model.err, width-13), warm, width-6)
 	} else {
@@ -293,8 +365,47 @@ func drawDashboard(screen dashboardScreen, model dashboardModel) {
 		}
 		drawText(screen, 3, height-3, status, muted, width-6)
 	}
-	drawText(screen, 3, height-2, "↑/↓ or j/k  move     r  refresh     q  quit", accent, width-6)
-	screen.Show()
+	if model.notice != "" {
+		drawText(screen, 3, height-5, clipCell(model.notice, width-6), warm, width-6)
+	}
+	switch model.mode {
+	case modeCreate:
+		drawCreateForm(screen, model.form, width, height,
+			tcell.StyleDefault.Foreground(brandLavender).Background(brandBackground),
+			accent, muted, warm)
+	case modeConfirmDelete:
+		if len(model.items) > 0 {
+			prompt := "Remove " + model.items[model.selected].Name + "? Sandbox files on the host are kept. [y/N]"
+			drawText(screen, 3, height-5, clipCell(prompt, width-6), warm.Bold(true), width-6)
+		}
+	}
+	drawText(screen, 3, height-2, "↑/↓ or j/k  move   n  new   s/x  start/stop   d  remove   a  attach   r  refresh   q  quit", accent, width-6)
+}
+
+// drawCreateForm renders the create-flow landing form.
+func drawCreateForm(screen dashboardScreen, form createFormModel, width, height int, primary, accent, muted, warm tcell.Style) {
+	boxWidth := min(width-8, 64)
+	boxX := (width - boxWidth) / 2
+	if boxX < 2 {
+		boxX = 2
+	}
+	for y := 6; y < height-6; y++ {
+		drawText(screen, boxX, y, strings.Repeat(" ", boxWidth), primary, boxWidth)
+	}
+	drawText(screen, boxX+2, 7, "NEW SANDBOX", accent, boxWidth-4)
+	for i, label := range createFormFields {
+		y := 9 + i*2
+		style := muted
+		if i == form.focus {
+			style = accent.Bold(true)
+		}
+		drawText(screen, boxX+2, y, label, style, 16)
+		drawText(screen, boxX+20, y, clipCell(form.values[i], boxWidth-22), primary, boxWidth-22)
+	}
+	if form.err != "" {
+		drawText(screen, boxX+2, height-8, clipCell(form.err, boxWidth-4), warm, boxWidth-4)
+	}
+	drawText(screen, boxX+2, height-7, "Tab/↑↓ move · Enter create · Esc cancel", muted, boxWidth-4)
 }
 
 func drawBrand(screen dashboardScreen, primary, accent tcell.Style, width int) {
