@@ -675,7 +675,10 @@ type fakeClient struct {
 	interactive     sdk.InteractiveAccountService
 	dockerPAT       sdk.DockerPATAccountService
 	accountStatuses sdk.AccountStatusService
+	versions        sdk.VersionService
 }
+
+func (f fakeClient) VersionService() sdk.VersionService { return f.versions }
 
 func (f fakeClient) DockerPATAccountService() sdk.DockerPATAccountService {
 	if f.dockerPAT == nil {

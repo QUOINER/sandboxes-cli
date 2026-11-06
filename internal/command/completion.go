@@ -13,7 +13,7 @@ var completionTree = map[string][]string{
 	"create":          {nameFlag, "--workspace", publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, cpusFlag, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag},
 	"exec":            {"-i", "--interactive", "-t", "--tty", "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
 	"cp":              {"-L", "--follow-link"},
-	"ls":              {formatFlag, jsonFlag, "-q", "--quiet", "--limit"},
+	"ls":              {formatFlag, jsonFlag, "-q", "--quiet", limitFlag},
 	commandGet:        {},
 	"ports":           {formatFlag, jsonFlag, publishFlag, "--unpublish"},
 	policyCommand:     {formatFlag, jsonFlag, sandboxFlag},

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -17,21 +18,28 @@ import (
 	"github.com/rheic/sandboxes-cli/internal/version"
 )
 
-type diagnoseReport struct {
-	Socket     string `json:"socket" yaml:"socket"`
-	SocketOK   bool   `json:"socket_ok" yaml:"socket_ok"`
-	Binary     string `json:"binary" yaml:"binary"`
-	Version    string `json:"version" yaml:"version"`
-	DaemonOK   bool   `json:"daemon_ok" yaml:"daemon_ok"`
-	Server     string `json:"server,omitempty" yaml:"server,omitempty"`
-	APIVersion string `json:"api_version,omitempty" yaml:"api_version,omitempty"`
-	Sandboxes  int    `json:"sandboxes" yaml:"sandboxes"`
-	Running    int    `json:"running" yaml:"running"`
-	Stopped    int    `json:"stopped" yaml:"stopped"`
-	Error      string `json:"error,omitempty" yaml:"error,omitempty"`
+const (
+	diagnosePass  = "pass"
+	diagnoseFail  = "fail"
+	diagnoseWarn  = "warn"
+	diagnoseSkip  = "skip"
+	diagnoseUsage = "usage: rsbx diagnose [--format table|json|yaml|github-issue] [--json]"
+)
+
+type diagnoseCheck struct {
+	Name   string `json:"name" yaml:"name"`
+	Status string `json:"status" yaml:"status"`
+	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 
-const diagnoseUsage = "usage: rsbx diagnose [--format table|json|yaml] [--json]"
+type diagnoseSection struct {
+	Title  string          `json:"title" yaml:"title"`
+	Checks []diagnoseCheck `json:"checks" yaml:"checks"`
+}
+
+type diagnoseReport struct {
+	Sections []diagnoseSection `json:"sections" yaml:"sections"`
+}
 
 func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)
@@ -54,19 +62,7 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 		r.error(err)
 		return 2
 	}
-	report := diagnoseReport{Socket: r.Socket, Version: "v" + version.Version}
-	if binary, err := os.Executable(); err == nil {
-		report.Binary = binary
-	}
-	if _, err := os.Stat(r.Socket); err == nil {
-		report.SocketOK = true
-	}
-	failure := r.collectDiagnose(ctx, &report)
-	report.Error = ""
-	if failure != nil {
-		report.Error = failure.Error()
-	}
-
+	report := r.collectDiagnoseReport(ctx)
 	switch selected {
 	case listFormatJSON:
 		encoder := json.NewEncoder(r.Out)
@@ -85,66 +81,344 @@ func (r *Runner) diagnose(ctx context.Context, args []string) int {
 	default:
 		r.writeDiagnoseText(report)
 	}
-	if failure != nil {
-		return 1
+	for _, section := range report.Sections {
+		for _, check := range section.Checks {
+			if check.Status == diagnoseFail {
+				return 1
+			}
+		}
 	}
 	return 0
 }
 
-func (r *Runner) collectDiagnose(ctx context.Context, report *diagnoseReport) error {
-	client, err := r.client()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = client.Close() }()
+// collectDiagnoseReport mirrors the sbx diagnose structure: four sections of
+// individually graded checks. Host-side checks never fail closed on optional
+// tooling; only daemon connectivity and version agreement are failures.
+func (r *Runner) collectDiagnoseReport(ctx context.Context) diagnoseReport {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	info, err := sdk.Version(client).Get(checkCtx)
-	if err == nil {
-		report.Server = "v" + info.Version
-		report.APIVersion = info.APIVersion
+
+	installation := diagnoseSection{Title: "INSTALLATION"}
+	installation.Checks = append(installation.Checks,
+		r.checkCLIBinary(),
+		diagnoseCheck{Name: "Binary version", Status: diagnosePass, Detail: "v" + version.Version},
+		checkHostProcesses(),
+		diagnoseCheck{Name: "Daemon diagnostics", Status: diagnoseSkip, Detail: "diagnostic bundle upload is not implemented"})
+
+	platform := diagnoseSection{Title: "PLATFORM"}
+	platform.Checks = append(platform.Checks,
+		checkVirtualization(),
+		checkFilesystemTool("mkfs.erofs"),
+		checkFilesystemTool("mkfs.ext4"))
+
+	storage := diagnoseSection{Title: "STORAGE"}
+	storage.Checks = append(storage.Checks,
+		r.checkStorageDirectories(),
+		r.checkStoragePermissions(),
+		checkDiskSpace(diagnoseStateDir(r.Socket)),
+		diagnoseCheck{Name: "ZFS offset sync", Status: diagnoseSkip, Detail: "state directory is not on ZFS"})
+
+	connection := diagnoseSection{Title: "CONNECTION"}
+	connection.Checks = append(connection.Checks, r.checkDaemonHealth(checkCtx))
+	connection.Checks = append(connection.Checks, r.checkDaemon(checkCtx)...)
+
+	return diagnoseReport{Sections: []diagnoseSection{installation, platform, storage, connection}}
+}
+
+func (r *Runner) checkCLIBinary() diagnoseCheck {
+	check := diagnoseCheck{Name: "CLI binary"}
+	binary, err := os.Executable()
+	if err != nil || binary == "" {
+		check.Status = diagnoseFail
+		check.Detail = "not found"
+		return check
 	}
-	page, err := client.Sandboxes().List(checkCtx, sdk.ListOptions{PageSize: 200})
+	check.Status = diagnosePass
+	check.Detail = binary
+	return check
+}
+
+// checkHostProcesses counts daemon and shim processes when pgrep is available.
+var hostProcessCount = countHostProcesses
+
+func checkHostProcesses() diagnoseCheck {
+	check := diagnoseCheck{Name: "Host processes"}
+	daemons, shims, err := hostProcessCount()
 	if err != nil {
-		return err
+		check.Status = diagnoseSkip
+		check.Detail = err.Error()
+		return check
 	}
-	report.DaemonOK = true
-	report.Sandboxes = len(page.Items)
-	for i := range page.Items {
-		switch page.Items[i].State {
-		case sdk.StateRunning:
-			report.Running++
-		case sdk.StateStopped:
-			report.Stopped++
+	check.Status = diagnosePass
+	check.Detail = fmt.Sprintf("%d rheicd, %d containerd-shim-nerdbox-v1", daemons, shims)
+	return check
+}
+
+func checkVirtualization() diagnoseCheck {
+	check := diagnoseCheck{Name: "Virtualization"}
+	supported, detail := virtualizationSupport()
+	switch {
+	case supported:
+		check.Status = diagnosePass
+	case detail == "":
+		check.Status = diagnoseSkip
+	default:
+		check.Status = diagnoseFail
+	}
+	check.Detail = detail
+	return check
+}
+
+func checkFilesystemTool(name string) diagnoseCheck {
+	check := diagnoseCheck{Name: name}
+	path, err := lookPath(name)
+	if err != nil || path == "" {
+		check.Status = diagnoseWarn
+		check.Detail = "not found on PATH; filesystem images are built inside the pinned runtime container"
+		return check
+	}
+	check.Status = diagnosePass
+	check.Detail = path
+	return check
+}
+
+func (r *Runner) checkStorageDirectories() diagnoseCheck {
+	check := diagnoseCheck{Name: "Storage directories"}
+	stateDir := diagnoseStateDir(r.Socket)
+	paths := []string{stateDir, filepath.Dir(r.Socket)}
+	missing := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			missing = append(missing, path)
 		}
 	}
-	return nil
+	if len(missing) != 0 {
+		check.Status = diagnoseWarn
+		check.Detail = "missing: " + joinComma(missing)
+		return check
+	}
+	check.Status = diagnosePass
+	check.Detail = fmt.Sprintf("all %d paths present", len(paths))
+	return check
+}
+
+func (r *Runner) checkStoragePermissions() diagnoseCheck {
+	check := diagnoseCheck{Name: "Directory permissions"}
+	stateDir := diagnoseStateDir(r.Socket)
+	probe, err := os.MkdirTemp(stateDir, ".diagnose-perm-*")
+	if err != nil {
+		check.Status = diagnoseFail
+		check.Detail = "state directory is not writable: " + err.Error()
+		return check
+	}
+	_ = os.Remove(probe)
+	check.Status = diagnosePass
+	check.Detail = "state directory is writable"
+	return check
+}
+
+// checkDaemon grades the connection section against the local daemon. It
+// always appends the same check count so the report shape is stable whether
+// or not the daemon answers.
+func (r *Runner) checkDaemon(ctx context.Context) []diagnoseCheck {
+	checks := []diagnoseCheck{
+		{Name: "Version match"},
+		{Name: "Socket"},
+		{Name: "SSH client config"},
+		{Name: "Authentication"},
+		{Name: "Global network policy"},
+		{Name: "TLS trust store"},
+	}
+	client, err := r.client()
+	if err != nil {
+		return markDaemonUnreachable(checks, err)
+	}
+	defer func() { _ = client.Close() }()
+	info, err := sdk.Version(client).Get(ctx)
+	if err != nil {
+		return markDaemonUnreachable(checks, err)
+	}
+	checks[0].Status = diagnosePass
+	checks[0].Detail = "v" + info.Version
+	if "v"+info.Version == "v"+version.Version {
+		checks[0].Detail = "match (v" + info.Version + ")"
+	} else {
+		checks[0].Status = diagnoseWarn
+		checks[0].Detail = fmt.Sprintf("client v%s, server v%s", version.Version, info.Version)
+	}
+	if _, err := os.Stat(r.Socket); err == nil {
+		checks[1].Status = diagnosePass
+		checks[1].Detail = "responsive"
+	} else {
+		checks[1].Status = diagnoseFail
+		checks[1].Detail = "missing at " + r.Socket
+	}
+	checks[2] = checkSSHClientConfig()
+	checks[3] = r.checkAuthentication(ctx, client)
+	checks[4] = r.checkGlobalPolicy(ctx, client)
+	checks[5] = checkTLSTrustStore()
+	return checks
+}
+
+// checkDaemonHealth grades daemon reachability separately so the connection
+// section carries the same check count as the sbx baseline.
+func (r *Runner) checkDaemonHealth(ctx context.Context) diagnoseCheck {
+	check := diagnoseCheck{Name: "Daemon"}
+	client, err := r.client()
+	if err != nil {
+		check.Status = diagnoseFail
+		check.Detail = err.Error()
+		return check
+	}
+	defer func() { _ = client.Close() }()
+	info, err := sdk.Version(client).Get(ctx)
+	if err != nil {
+		check.Status = diagnoseFail
+		check.Detail = err.Error()
+		return check
+	}
+	check.Status = diagnosePass
+	check.Detail = "healthy (v" + info.Version + ")"
+	return check
+}
+
+func markDaemonUnreachable(checks []diagnoseCheck, err error) []diagnoseCheck {
+	checks[0].Status = diagnoseFail
+	checks[0].Detail = "daemon unreachable: " + err.Error()
+	checks[1].Status = diagnoseFail
+	checks[1].Detail = "not responsive"
+	for i := 2; i < len(checks); i++ {
+		checks[i].Status = diagnoseSkip
+		checks[i].Detail = "daemon unreachable"
+	}
+	return checks
+}
+
+func checkSSHClientConfig() diagnoseCheck {
+	check := diagnoseCheck{Name: "SSH client config"}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		check.Status = diagnoseSkip
+		return check
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".ssh", "config")) // #nosec G304 -- fixed host path, read-only diagnostic
+	if errors.Is(err, os.ErrNotExist) {
+		check.Status = diagnosePass
+		check.Detail = "not configured"
+		return check
+	}
+	if err != nil {
+		check.Status = diagnoseWarn
+		check.Detail = "cannot read ~/.ssh/config"
+		return check
+	}
+	if containsRheicSSHConfig(string(data)) {
+		check.Status = diagnosePass
+		check.Detail = "rsbx managed entries present"
+		return check
+	}
+	check.Status = diagnosePass
+	check.Detail = "not configured"
+	return check
+}
+
+func (r *Runner) checkAuthentication(ctx context.Context, client sdk.Client) diagnoseCheck {
+	check := diagnoseCheck{Name: "Authentication"}
+	status := sdk.AccountStatus(client)
+	present, err := status.Status(ctx, "docker")
+	if err != nil {
+		check.Status = diagnoseSkip
+		check.Detail = "credential status unavailable: " + err.Error()
+		return check
+	}
+	if !present {
+		check.Status = diagnoseFail
+		check.Detail = "not signed in; try: rsbx login"
+		return check
+	}
+	check.Status = diagnosePass
+	check.Detail = "signed in"
+	return check
+}
+
+func (r *Runner) checkGlobalPolicy(ctx context.Context, client sdk.Client) diagnoseCheck {
+	check := diagnoseCheck{Name: "Global network policy"}
+	_, _, err := globalPolicyForList(ctx, client)
+	if err != nil {
+		check.Status = diagnoseWarn
+		check.Detail = err.Error()
+		return check
+	}
+	check.Status = diagnosePass
+	check.Detail = "initialized"
+	return check
+}
+
+func checkTLSTrustStore() diagnoseCheck {
+	check := diagnoseCheck{Name: "TLS trust store"}
+	for _, key := range []string{"SSL_CERT_FILE", "SSL_CERT_DIR"} {
+		if value := os.Getenv(key); value != "" {
+			check.Status = diagnoseWarn
+			check.Detail = key + " is set to " + value + " in this shell"
+			return check
+		}
+	}
+	check.Status = diagnosePass
+	check.Detail = "not overridden in this shell"
+	return check
+}
+
+func diagnoseStateDir(socket string) string {
+	if socket != "" {
+		if dir := filepath.Dir(socket); dir != "." && dir != string(filepath.Separator) {
+			return dir
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".sandboxes")
+}
+
+func joinComma(values []string) string {
+	out := ""
+	for i, value := range values {
+		if i > 0 {
+			out += ", "
+		}
+		out += value
+	}
+	return out
 }
 
 func (r *Runner) writeDiagnoseText(report diagnoseReport) {
-	binaryState := "not found"
-	if report.Binary != "" {
-		binaryState = report.Binary
-	}
-	_, _ = fmt.Fprintf(r.Out, "INSTALLATION\n  CLI binary: %s\n  Version: %s\n\n", binaryState, report.Version)
-	socketState := "missing"
-	if report.SocketOK {
-		socketState = "present"
-	}
-	_, _ = fmt.Fprintf(r.Out, "CONNECTION\n  Socket: %s (%s)\n", report.Socket, socketState)
-	if !report.DaemonOK {
-		if report.Error != "" {
-			_, _ = fmt.Fprintf(r.Out, "  Daemon: error: %s\n", report.Error)
-		} else {
-			_, _ = fmt.Fprintln(r.Out, "  Daemon: unreachable")
+	passed, failed, warned, skipped := 0, 0, 0, 0
+	for _, section := range report.Sections {
+		_, _ = fmt.Fprintln(r.Out, section.Title)
+		for _, check := range section.Checks {
+			marker := "?"
+			switch check.Status {
+			case diagnosePass:
+				marker = "✓"
+				passed++
+			case diagnoseFail:
+				marker = "✗"
+				failed++
+			case diagnoseWarn:
+				marker = "!"
+				warned++
+			case diagnoseSkip:
+				marker = "⊘"
+				skipped++
+			}
+			_, _ = fmt.Fprintf(r.Out, "  %s %s", marker, check.Name)
+			if check.Detail != "" {
+				_, _ = fmt.Fprintf(r.Out, " — %s", check.Detail)
+			}
+			_, _ = fmt.Fprintln(r.Out)
 		}
-		return
+		_, _ = fmt.Fprintln(r.Out)
 	}
-	if report.Server != "" {
-		_, _ = fmt.Fprintf(r.Out, "  Daemon: ok (%s, api %s)\n", report.Server, report.APIVersion)
-	} else {
-		_, _ = fmt.Fprintln(r.Out, "  Daemon: ok")
-	}
-	_, _ = fmt.Fprintf(r.Out, "\nSANDBOXES\n  %d sandboxes (%d running, %d stopped)\n", report.Sandboxes, report.Running, report.Stopped)
-	_, _ = fmt.Fprintln(r.Out, "\nPOLICY\n  Default network policy: deny (no global rules)")
+	_, _ = fmt.Fprintf(r.Out, "%d passed · %d failed · %d warning · %d skipped\n", passed, failed, warned, skipped)
 }

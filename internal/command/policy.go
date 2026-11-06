@@ -35,15 +35,17 @@ type policyRuleOutput struct {
 	Port         uint16 `json:"port" yaml:"port"`
 }
 
-//nolint:cyclop // one command dispatch switch.
+//nolint:cyclop,gocyclo // one command dispatch switch with one case per subcommand.
 func (r *Runner) policy(ctx context.Context, args []string) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(r.Err, policyUsage)
 		return 2
 	}
 	switch args[0] {
-	case "ls", commandInspect:
+	case "ls":
 		return r.policyList(ctx, args[1:])
+	case commandInspect:
+		return r.policyInspect(ctx, args[1:])
 	case "check":
 		if len(args) > 1 && args[1] == networkKeyword {
 			return r.policyCheckNetwork(ctx, args[2:])
@@ -61,9 +63,14 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		return r.policyInit(ctx, args[1:])
 	case "profile":
 		return r.policyProfile(ctx, args[1:])
-	case commandReset, "refresh", "log", "approval":
-		_, _ = fmt.Fprintf(r.Err, "rsbx policy %s: this policy operation is not implemented\n", args[0])
-		return 1
+	case "log":
+		return r.policyLog(ctx, args[1:])
+	case "refresh":
+		return r.policyUnsupported("refresh", "governance polling is not implemented; policy changes apply on the next sandbox network reload")
+	case commandReset:
+		return r.policyUnsupported(commandReset, "resetting the policy store requires daemon support and is not implemented")
+	case "approval":
+		return r.policyUnsupported("approval", "approval-gated operations are not implemented, so no approvals can be pending")
 	case helpCommand, helpShort, helpFlag:
 		_, _ = fmt.Fprint(r.Out, policyUsage)
 		return 0
@@ -72,6 +79,11 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprint(r.Err, policyUsage)
 		return 2
 	}
+}
+
+func (r *Runner) policyUnsupported(name, reason string) int {
+	_, _ = fmt.Fprintf(r.Err, "rsbx policy %s: %s\n", name, reason)
+	return 1
 }
 
 // policyNetworkScope parses the shared `policy <verb> network [--sandbox NAME]`
@@ -356,7 +368,7 @@ func evaluatePolicyTarget(allow, deny []sdk.NetworkRule, protocol string, ip net
 }
 
 func (r *Runner) policyList(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--format": true})
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("policy ls", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")
@@ -636,7 +648,7 @@ func policyRulesFrom(scope string, allow, deny []sdk.NetworkRule) []policyRuleOu
 			if protocol == "" {
 				protocol = tcpProtocol
 			}
-			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, Scope: scope, ResourceType: "network",
+			out = append(out, policyRuleOutput{RuleID: rules[i].RuleID, Scope: scope, ResourceType: networkKeyword,
 				Action: action, Provenance: "user", Protocol: protocol, CIDR: rules[i].CIDR, Domain: rules[i].Domain, Port: rules[i].Port})
 		}
 	}
@@ -738,7 +750,10 @@ const policyUsage = `Usage: rsbx policy COMMAND
 
 Commands:
   ls [SANDBOX] [--format table|json|yaml] list global and sandbox allow/deny rules
-  inspect SANDBOX                         alias for ls
+  inspect RULE_ID|SANDBOX [--format ...]  show one rule or sandbox policy
+  log [SANDBOX] [--type all|network] [--limit N]
+                                          show gateway audit decisions
+  refresh/reset/approval                  not implemented; fail closed
   allow SANDBOX CIDR[:PORT]               add an allow rule (legacy local grammar)
   deny SANDBOX CIDR[:PORT]                add a deny rule (legacy local grammar)
   rm SANDBOX CIDR[:PORT]                  remove an allow or deny rule
@@ -752,6 +767,6 @@ Commands:
   init allow-all|balanced|deny-all        set the global default profile
   profile [ls]                            show the global default and available profiles
 
-reset/refresh/log/approvals and filesystem/domain rules are not implemented.
+policy refresh/reset/approval need daemon support and fail closed.
 Default is deny-all.
 `
