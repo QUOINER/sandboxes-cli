@@ -216,7 +216,7 @@ func convertOAuthCredentials(credentials []kit.Credential) ([]sdk.OAuthCredentia
 		}
 		// OpenAI OAuth uses the daemon's separately configured provider adapter;
 		// this declaration cannot replace its issuer or endpoint policy.
-		if credential.Service == "openai" {
+		if credential.Service == openAIService {
 			continue
 		}
 		var tokenEndpoint *sdk.OAuthTokenEndpoint
@@ -260,7 +260,7 @@ func mergeOAuthEnvironment(doc kit.Kit, env *[]string) error {
 		credentialKey, _, _ := strings.Cut(credentialEnv, "=")
 		baseURLKey := ""
 		if credentialKey == openAIAPIKeyEnv {
-			baseURLKey = "OPENAI_BASE_URL"
+			baseURLKey = openAIBaseURLEnv
 		}
 		for _, existing := range *env {
 			key, _, _ := strings.Cut(existing, "=")

@@ -28,6 +28,7 @@ type templateOutput struct {
 	Command string `json:"command,omitempty" yaml:"command,omitempty"`
 	Status  string `json:"status" yaml:"status"`
 	Docker  bool   `json:"docker,omitempty" yaml:"docker,omitempty"`
+	Auth    string `json:"auth,omitempty" yaml:"auth,omitempty"`
 	Notes   string `json:"notes,omitempty" yaml:"notes,omitempty"`
 }
 
@@ -141,7 +142,7 @@ func (r *Runner) templateInspect(args []string) int {
 			}
 			return 0
 		}
-		_, _ = fmt.Fprintf(r.Out, "name: %s\nimage: %s\ncommand: %s\nstatus: %s\ndocker: %t\nnotes: %s\n", row.Name, row.Image, row.Command, row.Status, row.Docker, row.Notes)
+		_, _ = fmt.Fprintf(r.Out, "name: %s\nimage: %s\ncommand: %s\nstatus: %s\ndocker: %t\nauth: %s\nnotes: %s\n", row.Name, row.Image, row.Command, row.Status, row.Docker, row.Auth, row.Notes)
 		return 0
 	}
 	r.error(fmt.Errorf("unknown template %q", fs.Arg(0)))
@@ -158,7 +159,7 @@ func templateRows() ([]templateOutput, error) {
 		spec, _ := registry.Lookup(name)
 		out = append(out, templateOutput{
 			Name: name, Image: spec.Image, Command: strings.Join(spec.Command, " "),
-			Status: string(spec.Status), Docker: spec.Docker, Notes: spec.Notes,
+			Status: string(spec.Status), Docker: spec.Docker, Auth: spec.Auth, Notes: spec.Notes,
 		})
 	}
 	return out, nil

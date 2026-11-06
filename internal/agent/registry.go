@@ -3,6 +3,7 @@ package agent
 
 import (
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ type Spec struct {
 	DefaultPorts  []string `yaml:"default_ports,omitempty"`
 	DetachCommand []string `yaml:"detach_command,omitempty"`
 	Notes         string   `yaml:"notes,omitempty"`
+	Auth          string   `yaml:"auth,omitempty"`
 }
 
 // Registry is an immutable agent set.
@@ -63,6 +65,9 @@ func Load() (*Registry, error) {
 			if len(spec.Command) == 0 {
 				return nil, fmt.Errorf("agent %q has no command", spec.Name)
 			}
+			if spec.Image != "" && !isDigestPinned(spec.Image) {
+				return nil, fmt.Errorf("agent %q image must be pinned by sha256 digest", spec.Name)
+			}
 		case StatusUnsupported:
 		default:
 			return nil, fmt.Errorf("agent %q has unknown status %q", spec.Name, spec.Status)
@@ -72,6 +77,15 @@ func Load() (*Registry, error) {
 	}
 	sort.Strings(r.names)
 	return r, nil
+}
+
+func isDigestPinned(image string) bool {
+	_, digest, ok := strings.Cut(image, "@sha256:")
+	if !ok || len(digest) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
 }
 
 // Lookup returns an agent by exact name.

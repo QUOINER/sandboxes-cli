@@ -2,27 +2,38 @@
 # contract known, not fully validated), unsupported (explicitly rejected).
 agents:
   - name: shell
-    command: ["/bin/sh"]
-    status: available
+    image: docker.io/docker/sandbox-templates@sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d
+    command: ["bash", "-l"]
+    status: preview
+    docker: true
+    auth: No agent is preinstalled; provider credential handoff is not implemented for this image.
+    notes: Docker sandbox-templates shell-docker image, pinned to its multi-platform manifest digest.
   - name: kimi
     image: ghcr.io/rheic/sandbox-kimi@sha256:b81684d2216bfa6b5a99872ee3917cf6e25e039bf5a61d47171ebcaaf0a46203
     command: ["kimi"]
     status: available
     notes: public pinned image; live-tested on the released CLI
   - name: codex
-    image: ghcr.io/rheic/sandbox-codex@sha256:9e691b40406f264fd63f9e0d48c50fcaa0dff34acdc51dceeaaa63929ea8d652
-    command: ["codex"]
-    status: available
-    docker: true
-    notes: public pinned image; nested Docker profile auto-enabled
-  - name: gemini
-    image: docker/sandbox-templates:gemini-docker
-    command: ["gemini"]
+    image: docker.io/docker/sandbox-templates@sha256:982f4518e7e5544e92a23e7fb7eaca9cd5ce9c7178782155a628c92ed723d9de
+    command: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
     status: preview
+    docker: true
+    auth: OpenAI API key or host OAuth adapter; provider runtime acceptance is still pending.
+    notes: Docker sandbox-templates codex-docker image, pinned to its multi-platform manifest digest.
+  - name: gemini
+    image: docker.io/docker/sandbox-templates@sha256:c7a31819508e076e2761a9140316cee4d32832b81dddbeb2e6f30e20e27966c3
+    command: ["gemini", "--yolo"]
+    status: preview
+    docker: true
+    auth: Stored Google API keys use the fixed host proxy; Google account OAuth and Vertex credentials are not host-brokered.
+    notes: Docker sandbox-templates gemini-docker image, pinned to its multi-platform manifest digest.
   - name: opencode
-    image: docker/sandbox-templates:opencode-docker
+    image: docker.io/docker/sandbox-templates@sha256:f36f91fef60ee2035fe07a5467cf00409d6301071ed790aa0c80c91f5c958d68
     command: ["opencode"]
     status: preview
+    docker: true
+    auth: Stored OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, and xAI API keys are exposed through host proxy references; provider setup and runtime acceptance are pending.
+    notes: Docker sandbox-templates opencode-docker image, pinned to its multi-platform manifest digest.
   - name: dsh
     image: ghcr.io/rheic/sandbox-dsh-preview@sha256:f37c7065aca89c14b0b45418c68cda74b451047688a34df6364694381d97d772
     command: ["dsh", "web"]
@@ -31,36 +42,53 @@ agents:
     detach_command: ["/bin/sh", "-c", "nohup /usr/local/bin/rheic-dsh-entrypoint >/tmp/rheic-dsh.log 2>&1 &"]
     notes: DeepSeek Harness web UI on guest port 8080, published on 127.0.0.1 by default
   - name: claude
-    image: docker/sandbox-templates:claude-code-docker
+    image: docker.io/docker/sandbox-templates@sha256:4a94d9144a70df744fd9247e0c365a14cfb97024afab8db7597c8ba3e0637642
     command: ["claude", "--dangerously-skip-permissions"]
     status: preview
-    notes: official Docker template; agent auth is not provisioned yet
+    docker: true
+    auth: A stored host anthropic API key is selected through the host proxy; Claude subscription OAuth is not host-brokered.
+    notes: Docker sandbox-templates claude-code-docker image, pinned to its multi-platform manifest digest.
   - name: cline
     status: unsupported
   - name: copilot
-    image: docker/sandbox-templates:copilot-docker
-    command: ["copilot"]
+    image: docker.io/docker/sandbox-templates@sha256:8d40b69acf7d1f5397c8752417e2a8daec3582aa426465cb995b3b6828f61778
+    command: ["copilot", "--yolo"]
     status: preview
-    notes: official Docker template; agent auth is not provisioned yet
+    docker: true
+    auth: Stored github tokens use fixed host proxy routes for GitHub and Copilot API hosts; OAuth and runtime behavior remain unvalidated.
+    notes: Docker sandbox-templates copilot-docker image, pinned to its multi-platform manifest digest.
   - name: cursor
-    status: unsupported
+    image: docker.io/docker/sandbox-templates@sha256:fc884f7c459b20d5737802f7a03e8b0870fe3081df1bd4468d07280f005aaca0
+    command: ["cursor-agent", "--yolo"]
+    status: preview
+    docker: true
+    auth: Stored cursor API keys use fixed host proxy routes; Cursor OAuth token polling is not host-brokered.
+    notes: Docker sandbox-templates cursor-agent-docker image, pinned to its multi-platform manifest digest.
   - name: devin
-    image: docker/sandbox-templates:devin-docker
-    command: ["devin"]
+    image: docker.io/docker/sandbox-templates@sha256:d75e560cc830d4034b8063c7e5506be07287b7fdf914e639ed9bf6e51db87c9e
+    command: ["devin", "--permission-mode", "dangerous", "--respect-workspace-trust=false"]
     status: preview
-    notes: official Docker template; agent auth is not provisioned yet
+    docker: true
+    auth: Devin account authentication; host credential lifecycle and proxy are not implemented.
+    notes: Docker sandbox-templates devin-docker image, pinned to its multi-platform manifest digest.
   - name: docker-agent
-    image: docker/sandbox-templates:docker-agent-docker
-    command: ["docker-agent"]
+    image: docker.io/docker/sandbox-templates@sha256:1d80405e301e8e2b18f12d04038ff18e5fdbe6de20bbed96ee5d0aff0c76d56a
+    command: ["docker-agent", "run", "--yolo"]
     status: preview
-    notes: official Docker template; agent auth is not provisioned yet
+    docker: true
+    auth: Stored OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, and xAI API keys are exposed through host proxy references; provider setup and runtime acceptance are pending.
+    notes: Docker sandbox-templates docker-agent-docker image, pinned to its multi-platform manifest digest.
   - name: droid
-    image: docker/sandbox-templates:droid-docker
+    image: docker.io/docker/sandbox-templates@sha256:b91eb1d1b20e9ec2089b1980fb0674d7f2ce8c74abb5e9019028ea7054fe2b1a
     command: ["droid"]
     status: preview
-    notes: official Docker template; agent auth is not provisioned yet
+    docker: true
+    auth: Stored droid Factory API keys use fixed host proxy routes; OAuth and runtime behavior remain unvalidated.
+    notes: Docker sandbox-templates droid-docker image, pinned to its multi-platform manifest digest.
   - name: kiro
-    image: docker/sandbox-templates:kiro-docker
-    command: ["kiro"]
+    image: docker.io/docker/sandbox-templates@sha256:5a43854f70019a08b1296e12f2b4855bf5199ee41a189d2da0b43ba51da657f9
+    command: ["kiro", "chat", "--trust-all-tools"]
     status: preview
-    notes: official Docker template; agent auth is not provisioned yet
+    docker: true
+    auth: Kiro device-flow login; host credential relay is not implemented.
+    notes: Docker sandbox-templates kiro-docker image, pinned to its multi-platform manifest digest.
