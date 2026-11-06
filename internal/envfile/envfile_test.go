@@ -250,6 +250,13 @@ func TestResolveArgumentValuesBoundsValueCount(t *testing.T) {
 	}
 }
 
+func TestResolveArgumentValuesBoundsCLIInputBytes(t *testing.T) {
+	value := strings.Repeat("x", maxArgumentInputSize+1)
+	if _, _, err := resolveArgumentValues(nil, ArgumentOverrides{Values: []string{value}}); err == nil || !strings.Contains(err.Error(), "exceed size limit") {
+		t.Fatalf("resolveArgumentValues() error = %v, want CLI input size error", err)
+	}
+}
+
 func stringPointer(value string) *string { return &value }
 
 func TestLoadRejectsInvalidBaseArgumentDefaultEvenWhenOverridden(t *testing.T) {
