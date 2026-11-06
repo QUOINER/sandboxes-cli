@@ -28,8 +28,7 @@ const (
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 var argumentIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
-var directoryReference = regexp.MustCompile(`\$\{\{\s*env\.([A-Za-z][A-Za-z0-9]*)\s*\}\}`)
-var argumentReference = regexp.MustCompile(`\$\{\{\s*env\.args\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}`)
+var environmentReference = regexp.MustCompile(`\$\{\{\s*env\.((?:args\.)?[A-Za-z_][A-Za-z0-9_-]*)\s*\}\}`)
 
 // ValidateName checks a name before the CLI applies a command-line override.
 func ValidateName(name string) error {
@@ -186,7 +185,7 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 		if err := stripArgumentDefinitions(root); err != nil {
 			return Plan{}, err
 		}
-		if err := interpolateArgumentReferences(root, argumentValues); err != nil {
+		if err := interpolateEnvironmentReferences(root, argumentValues, filepath.Dir(source.path), projectDir); err != nil {
 			return Plan{}, err
 		}
 		doc, err := decodeDocumentNode(root)
@@ -196,7 +195,7 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 		if err := doc.validate(); err != nil {
 			return Plan{}, err
 		}
-		plan, err = mergeDocument(plan, doc, source.path, projectDir)
+		plan, err = mergeDocument(plan, doc, source.path)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -295,7 +294,7 @@ func LoadDefaultWithArguments(homeDir, workingDir string, overrides ArgumentOver
 	return load(paths, filepath.Clean(projectDir), overrides)
 }
 
-func mergeDocument(plan Plan, doc document, filePath, projectDir string) (Plan, error) {
+func mergeDocument(plan Plan, doc document, filePath string) (Plan, error) {
 	if doc.Name != "" {
 		plan.Name = doc.Name
 	}
@@ -303,14 +302,14 @@ func mergeDocument(plan Plan, doc document, filePath, projectDir string) (Plan, 
 		plan.Agent = doc.Agent
 	}
 	if doc.Workspace.Path != "" {
-		resolved, err := resolveWorkspace(filePath, doc.Workspace.Path, projectDir)
+		resolved, err := resolveWorkspace(filePath, doc.Workspace.Path)
 		if err != nil {
 			return Plan{}, err
 		}
 		plan.Workspace = resolved
 	}
 	for _, mount := range doc.AdditionalWorkspaces {
-		resolved, err := resolveWorkspace(filePath, mount.Path, projectDir)
+		resolved, err := resolveWorkspace(filePath, mount.Path)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -496,26 +495,30 @@ func rejectArgumentReferencesInDefinitions(root *yaml.Node) error {
 		return errors.New("environment file must be a YAML mapping")
 	}
 	for i := 0; i+1 < len(root.Content[0].Content); i += 2 {
-		if root.Content[0].Content[i].Value == argumentKey && nodeContainsArgumentReference(root.Content[0].Content[i+1]) {
+		if root.Content[0].Content[i].Value == argumentKey && nodeContainsEnvironmentReference(root.Content[0].Content[i+1]) {
 			return errors.New("environment arguments cannot reference other arguments")
 		}
 	}
 	return nil
 }
 
-func nodeContainsArgumentReference(node *yaml.Node) bool {
-	if node.Kind == yaml.ScalarNode && node.Tag == yamlStringTag && argumentReference.FindStringIndex(node.Value) != nil {
-		return true
+func nodeContainsEnvironmentReference(node *yaml.Node) bool {
+	if node.Kind == yaml.ScalarNode && node.Tag == yamlStringTag {
+		for _, match := range environmentReference.FindAllStringSubmatchIndex(node.Value, -1) {
+			if match[0] == 0 || node.Value[match[0]-1] != '$' {
+				return true
+			}
+		}
 	}
 	for _, child := range node.Content {
-		if nodeContainsArgumentReference(child) {
+		if nodeContainsEnvironmentReference(child) {
 			return true
 		}
 	}
 	return false
 }
 
-func interpolateArgumentReferences(root *yaml.Node, values map[string]string) error {
+func interpolateEnvironmentReferences(root *yaml.Node, values map[string]string, fileDir, projectDir string) error {
 	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
 		return errors.New("environment file must be a YAML mapping")
 	}
@@ -525,16 +528,16 @@ func interpolateArgumentReferences(root *yaml.Node, values map[string]string) er
 		if key.Value == argumentKey {
 			continue
 		}
-		if err := interpolateNode(value, values, &budget); err != nil {
+		if err := interpolateNode(value, values, fileDir, projectDir, &budget); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func interpolateNode(node *yaml.Node, values map[string]string, budget *int) error {
+func interpolateNode(node *yaml.Node, values map[string]string, fileDir, projectDir string, budget *int) error {
 	if node.Kind == yaml.ScalarNode {
-		if err := interpolateScalar(node, values); err != nil {
+		if err := interpolateScalar(node, values, fileDir, projectDir); err != nil {
 			return err
 		}
 		*budget += len(node.Value)
@@ -544,41 +547,44 @@ func interpolateNode(node *yaml.Node, values map[string]string, budget *int) err
 		return nil
 	}
 	if node.Kind == yaml.MappingNode {
-		return interpolateMappingNode(node, values, budget)
+		return interpolateMappingNode(node, values, fileDir, projectDir, budget)
 	}
 	for _, child := range node.Content {
-		if err := interpolateNode(child, values, budget); err != nil {
+		if err := interpolateNode(child, values, fileDir, projectDir, budget); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func interpolateMappingNode(node *yaml.Node, values map[string]string, budget *int) error {
+func interpolateMappingNode(node *yaml.Node, values map[string]string, fileDir, projectDir string, budget *int) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i], node.Content[i+1]
-		if nodeContainsArgumentReference(key) {
-			return errors.New("environment argument references cannot appear in field names")
+		if nodeContainsEnvironmentReference(key) {
+			return errors.New("environment references cannot appear in field names")
 		}
-		if err := interpolateNode(key, values, budget); err != nil {
+		if err := interpolateNode(key, values, fileDir, projectDir, budget); err != nil {
 			return err
 		}
-		if err := interpolateNode(value, values, budget); err != nil {
+		if err := interpolateNode(value, values, fileDir, projectDir, budget); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func interpolateScalar(node *yaml.Node, values map[string]string) error {
+func interpolateScalar(node *yaml.Node, values map[string]string, fileDir, projectDir string) error {
 	if node.Kind != yaml.ScalarNode || node.Tag != yamlStringTag {
 		return nil
 	}
-	matches := argumentReference.FindAllStringSubmatchIndex(node.Value, -1)
+	matches := environmentReference.FindAllStringSubmatchIndex(node.Value, -1)
+	if err := validateEnvironmentReferenceSyntax(node.Value, matches); err != nil {
+		return err
+	}
 	if len(matches) == 0 {
 		return nil
 	}
-	resolved, err := replaceArgumentReferences(node.Value, matches, values)
+	resolved, err := replaceEnvironmentReferences(node.Value, matches, values, fileDir, projectDir)
 	if err != nil {
 		return err
 	}
@@ -589,16 +595,42 @@ func interpolateScalar(node *yaml.Node, values map[string]string) error {
 	return nil
 }
 
-func replaceArgumentReferences(source string, matches [][]int, values map[string]string) (string, error) {
+func validateEnvironmentReferenceSyntax(value string, matches [][]int) error {
+	for offset := 0; offset < len(value); {
+		relative := strings.Index(value[offset:], "${{")
+		if relative < 0 {
+			return nil
+		}
+		start := offset + relative
+		if start > 0 && value[start-1] == '$' {
+			offset = start + 3
+			continue
+		}
+		matched := false
+		for _, match := range matches {
+			if match[0] == start {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return errors.New("unsupported environment reference")
+		}
+		offset = start + 3
+	}
+	return nil
+}
+
+func replaceEnvironmentReferences(source string, matches [][]int, values map[string]string, fileDir, projectDir string) (string, error) {
 	outputSize := len(source)
 	for _, match := range matches {
 		if match[0] > 0 && source[match[0]-1] == '$' {
 			outputSize--
 			continue
 		}
-		value, ok := values[source[match[2]:match[3]]]
-		if !ok {
-			return "", errors.New("environment references an undeclared argument")
+		value, err := resolveEnvironmentReference(source[match[2]:match[3]], values, fileDir, projectDir)
+		if err != nil {
+			return "", err
 		}
 		outputSize += len(value) - (match[1] - match[0])
 		if outputSize > maxFileSize {
@@ -615,9 +647,9 @@ func replaceArgumentReferences(source string, matches [][]int, values map[string
 			last = match[1]
 			continue
 		}
-		value, ok := values[source[match[2]:match[3]]]
-		if !ok {
-			return "", errors.New("environment references an undeclared argument")
+		value, err := resolveEnvironmentReference(source[match[2]:match[3]], values, fileDir, projectDir)
+		if err != nil {
+			return "", err
 		}
 		resolved.WriteString(source[last:match[0]])
 		resolved.WriteString(value)
@@ -625,6 +657,24 @@ func replaceArgumentReferences(source string, matches [][]int, values map[string
 	}
 	resolved.WriteString(source[last:])
 	return resolved.String(), nil
+}
+
+func resolveEnvironmentReference(name string, values map[string]string, fileDir, projectDir string) (string, error) {
+	if strings.HasPrefix(name, "args.") {
+		value, ok := values[strings.TrimPrefix(name, "args.")]
+		if !ok {
+			return "", errors.New("environment references an undeclared argument")
+		}
+		return value, nil
+	}
+	switch name {
+	case "projectDir":
+		return projectDir, nil
+	case "fileDir":
+		return fileDir, nil
+	default:
+		return "", errors.New("unsupported environment reference")
+	}
 }
 
 func setPlainScalar(node *yaml.Node, value string) error {
@@ -902,11 +952,7 @@ func validateYAMLTree(root *yaml.Node) error {
 	return nil
 }
 
-func resolveWorkspace(filePath, path, projectDir string) (string, error) {
-	path, err := expandDirectoryReferences(path, filepath.Dir(filePath), projectDir)
-	if err != nil {
-		return "", err
-	}
+func resolveWorkspace(filePath, path string) (string, error) {
 	if filepath.IsAbs(path) {
 		return filepath.Clean(path), nil
 	}
@@ -915,35 +961,4 @@ func resolveWorkspace(filePath, path, projectDir string) (string, error) {
 		return "", errors.New("resolve workspace path")
 	}
 	return filepath.Clean(resolved), nil
-}
-
-func expandDirectoryReferences(value, fileDir, projectDir string) (string, error) {
-	unexpanded := directoryReference.ReplaceAllString(value, "")
-	if strings.Contains(unexpanded, "${{") {
-		return "", errors.New("unsupported environment directory reference")
-	}
-	var expansionErr error
-	expanded := directoryReference.ReplaceAllStringFunc(value, func(reference string) string {
-		if expansionErr != nil {
-			return reference
-		}
-		match := directoryReference.FindStringSubmatch(reference)
-		if len(match) != 2 {
-			expansionErr = errors.New("invalid environment directory reference")
-			return reference
-		}
-		switch match[1] {
-		case "projectDir":
-			return projectDir
-		case "fileDir":
-			return fileDir
-		default:
-			expansionErr = errors.New("unsupported environment directory reference")
-			return reference
-		}
-	})
-	if expansionErr != nil {
-		return "", expansionErr
-	}
-	return expanded, nil
 }

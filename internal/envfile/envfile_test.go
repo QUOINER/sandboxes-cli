@@ -150,10 +150,18 @@ func TestLoadDefaultExpandsProjectDirectoryInHomeDefaults(t *testing.T) {
 }
 
 func TestLoadRejectsUnknownDirectoryReferences(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
-	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nworkspace: \"${{ env.unknown }}\"\n")
-	if _, err := Load([]string{path}); err == nil {
-		t.Fatal("unknown environment reference accepted")
+	cases := map[string]string{
+		"workspace":   "workspace: \"${{ env.unknown }}\"\n",
+		"other field": "env:\n  TOKEN: ${{ env.secret.value }}\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+			writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\n"+body)
+			if _, err := Load([]string{path}); err == nil {
+				t.Fatal("unknown environment reference accepted")
+			}
+		})
 	}
 }
 
@@ -226,7 +234,7 @@ func TestLoadRejectsInvalidBaseArgumentDefaultEvenWhenOverridden(t *testing.T) {
 
 func TestLoadInterpolatesArgumentReferencesWithoutRetainingValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
-	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nargs:\n  workspace:\n    required: true\n  cpus:\n    default: \"4\"\n  suffix:\n    default: preview\nenv:\n  API_URL: 'https://${{ env.args.workspace }}/v1'\n  DEPLOYMENT: ${{ env.args.suffix }}\nsandboxOptions:\n  cpus: ${{ env.args.cpus }}\n")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nworkspace: ${{ env.args.workspace }}\nargs:\n  workspace:\n    required: true\n  cpus:\n    default: \"4\"\n  suffix:\n    default: preview\nenv:\n  API_URL: 'https://${{ env.args.workspace }}/v1'\n  DEPLOYMENT: ${{ env.args.suffix }}\nsandboxOptions:\n  cpus: ${{ env.args.cpus }}\n")
 	plan, err := LoadWithArguments([]string{path}, ArgumentOverrides{Values: []string{"workspace=api.example"}})
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +244,9 @@ func TestLoadInterpolatesArgumentReferencesWithoutRetainingValues(t *testing.T) 
 	}
 	if plan.CPUs == nil || *plan.CPUs != 4 {
 		t.Fatalf("substituted CPU value = %#v, want 4", plan.CPUs)
+	}
+	if want := filepath.Join(filepath.Dir(path), "api.example"); plan.Workspace != want {
+		t.Fatalf("interpolated workspace = %q, want %q", plan.Workspace, want)
 	}
 	if !reflect.DeepEqual(plan.EnvironmentKeys, []string{"API_URL", "DEPLOYMENT"}) {
 		t.Fatalf("environment keys = %#v", plan.EnvironmentKeys)
@@ -258,13 +269,21 @@ func TestLoadRejectsUnknownAndSelfReferencingArguments(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsEscapedReferenceLiteralInArgumentDefinition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nargs:\n  literal:\n    default: '$${{ env.args.other }}'\n")
+	if _, err := Load([]string{path}); err != nil {
+		t.Fatalf("Load() rejected escaped literal: %v", err)
+	}
+}
+
 func TestInterpolateArgumentReferencesPreservesEscapedAndSubstitutedText(t *testing.T) {
 	node := yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStringTag, Style: yaml.SingleQuotedStyle, Value: "$${{ env.args.first }} / ${{ env.args.first }}"}
-	values := map[string]string{"first": "${{ env.args.second }}", "second": "expanded"}
-	if err := interpolateScalar(&node, values); err != nil {
+	values := map[string]string{"first": "${{ env.projectDir }}"}
+	if err := interpolateScalar(&node, values, "/project", "/project"); err != nil {
 		t.Fatal(err)
 	}
-	want := "${{ env.args.first }} / ${{ env.args.second }}"
+	want := "${{ env.args.first }} / ${{ env.projectDir }}"
 	if node.Value != want {
 		t.Fatalf("interpolated scalar = %q, want %q", node.Value, want)
 	}
@@ -272,8 +291,39 @@ func TestInterpolateArgumentReferencesPreservesEscapedAndSubstitutedText(t *test
 
 func TestReplaceArgumentReferencesRejectsExpandedValueOverLimit(t *testing.T) {
 	source := "${{ env.args.value }}${{ env.args.value }}"
-	if _, err := replaceArgumentReferences(source, argumentReference.FindAllStringSubmatchIndex(source, -1), map[string]string{"value": strings.Repeat("x", maxFileSize/2+1)}); err == nil {
-		t.Fatal("replaceArgumentReferences() succeeded beyond the expansion limit")
+	if _, err := replaceEnvironmentReferences(source, environmentReference.FindAllStringSubmatchIndex(source, -1), map[string]string{"value": strings.Repeat("x", maxFileSize/2+1)}, "", ""); err == nil {
+		t.Fatal("replaceEnvironmentReferences() succeeded beyond the expansion limit")
+	}
+}
+
+func TestInterpolateDirectoryReferencesInAllYAMLValues(t *testing.T) {
+	node := yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStringTag, Style: yaml.SingleQuotedStyle, Value: "${{ env.fileDir }}:${{ env.projectDir }}"}
+	if err := interpolateScalar(&node, nil, "/declaring/file", "/project"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "/declaring/file:/project"; node.Value != want {
+		t.Fatalf("interpolated scalar = %q, want %q", node.Value, want)
+	}
+}
+
+func TestLoadExpandsDirectoryReferencesBeyondWorkspaceFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nenv:\n  PROJECT_ROOT: ${{ env.projectDir }}\n  DECLARING_FILE: ${{ env.fileDir }}\n")
+	root, _, _, err := readDocumentNode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := interpolateEnvironmentReferences(root, nil, filepath.Dir(path), filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := decodeDocumentNode(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"PROJECT_ROOT": filepath.Dir(path), "DECLARING_FILE": filepath.Dir(path)} {
+		if doc.Env[key] != want {
+			t.Fatalf("env[%s] = %q, want %q", key, doc.Env[key], want)
+		}
 	}
 }
 
@@ -379,13 +429,13 @@ func FuzzParseArgumentValues(f *testing.F) {
 	})
 }
 
-func FuzzInterpolateArgumentReferences(f *testing.F) {
+func FuzzInterpolateEnvironmentReferences(f *testing.F) {
 	f.Add("${{ env.args.value }}", "plain")
 	f.Add("prefix-${{ env.args.value }}-suffix", "with spaces")
 	f.Add("$${{ env.args.value }}", "literal")
 	f.Fuzz(func(t *testing.T, source, value string) {
 		node := yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStringTag, Style: yaml.SingleQuotedStyle, Value: source}
-		err := interpolateScalar(&node, map[string]string{"value": value})
+		err := interpolateScalar(&node, map[string]string{"value": value}, "", "")
 		if err == nil && len(node.Value) > maxFileSize {
 			t.Fatalf("interpolated scalar length %d exceeds limit", len(node.Value))
 		}
