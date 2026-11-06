@@ -113,4 +113,13 @@ func TestEnvironmentPlanDefaultsAndExplicitPathPrecedence(t *testing.T) {
 	if strings.Contains(explicitOutput, "HOME_DEFAULT") || !strings.Contains(explicitOutput, "PROJECT_VALUE=<redacted>") {
 		t.Fatalf("explicit path did not skip home defaults: %q", explicitOutput)
 	}
+	nameOutput := run("env", "plan", projectFile, "--name", "override-name")
+	if !strings.Contains(nameOutput, "Name: override-name\n") {
+		t.Fatalf("--name did not override file/default name: %q", nameOutput)
+	}
+	var invalidOut, invalidErr bytes.Buffer
+	invalidRunner := NewRunner(&invalidOut, &invalidErr)
+	if code := invalidRunner.Run(context.Background(), []string{"env", "plan", "--name", "bad/name", projectFile}); code == 0 {
+		t.Fatal("invalid --name was accepted")
+	}
 }

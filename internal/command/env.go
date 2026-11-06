@@ -21,10 +21,11 @@ func (r *Runner) environment(args []string) int {
 	}
 	fs := flag.NewFlagSet("env plan", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
+	name := fs.String("name", "", "override the environment sandbox name")
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
+		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\n  --name NAME  override the sandbox name\n\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
 	}
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args[1:], map[string]bool{"--name": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -32,6 +33,10 @@ func (r *Runner) environment(args []string) int {
 	}
 	plan, err := loadEnvironmentPlan(fs.Args())
 	if err != nil {
+		_, _ = fmt.Fprintf(r.Err, "rsbx env plan: %s\n", err)
+		return 1
+	}
+	if err := applyEnvironmentName(&plan, *name); err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx env plan: %s\n", err)
 		return 1
 	}
@@ -62,6 +67,17 @@ func (r *Runner) environment(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func applyEnvironmentName(plan *envfile.Plan, name string) error {
+	if name == "" {
+		return nil
+	}
+	if err := envfile.ValidateName(name); err != nil {
+		return err
+	}
+	plan.Name = name
+	return nil
 }
 
 func loadEnvironmentPlan(paths []string) (envfile.Plan, error) {

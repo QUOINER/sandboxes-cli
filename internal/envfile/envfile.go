@@ -23,6 +23,14 @@ const (
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
+// ValidateName checks a name before the CLI applies a command-line override.
+func ValidateName(name string) error {
+	if !identifier.MatchString(name) {
+		return errors.New("environment name is invalid")
+	}
+	return nil
+}
+
 // Workspace is a host directory the preview would mount.
 type Workspace struct {
 	Path     string
