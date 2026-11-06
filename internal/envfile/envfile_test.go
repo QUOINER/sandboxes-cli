@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -221,6 +222,35 @@ func TestLoadArgumentDefaultsAndFilesOverrideInOrder(t *testing.T) {
 		t.Fatalf("argument names = %#v", plan.ArgumentNames)
 	}
 }
+
+func TestLoadBoundsCombinedArgumentFileInput(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, envPath, "schemaVersion: \"1\"\nagent: shell\nargs:\n  mode:\n    default: stable\n")
+	argumentPath := filepath.Join(t.TempDir(), "args.txt")
+	writeEnvFile(t, argumentPath, "mode=stable\n"+strings.Repeat("#", maxFileSize-12))
+	files := make([]string, maxArgumentInputSize/maxFileSize+1)
+	for i := range files {
+		files[i] = argumentPath
+	}
+	if _, err := LoadWithArguments([]string{envPath}, ArgumentOverrides{Files: files}); err == nil || !strings.Contains(err.Error(), "exceed size limit") {
+		t.Fatalf("LoadWithArguments() error = %v, want combined input size error", err)
+	}
+}
+
+func TestResolveArgumentValuesBoundsValueCount(t *testing.T) {
+	arguments := make(map[string]argumentDeclaration, maxYAMLNodes+1)
+	values := make([]string, maxYAMLNodes+1)
+	for i := range values {
+		name := "value_" + strconv.Itoa(i)
+		arguments[name] = argumentDeclaration{Default: stringPointer("x")}
+		values[i] = name + "=x"
+	}
+	if _, _, err := resolveArgumentValues(arguments, ArgumentOverrides{Values: values}); err == nil || !strings.Contains(err.Error(), "too many environment argument values") {
+		t.Fatalf("resolveArgumentValues() error = %v, want argument count limit error", err)
+	}
+}
+
+func stringPointer(value string) *string { return &value }
 
 func TestLoadRejectsInvalidBaseArgumentDefaultEvenWhenOverridden(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "base.yaml")

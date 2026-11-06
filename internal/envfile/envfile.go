@@ -18,12 +18,13 @@ import (
 )
 
 const (
-	maxFileSize   = 1 << 20
-	maxInputSize  = 32 << 20
-	maxYAMLNodes  = 20_000
-	maxYAMLDepth  = 64
-	yamlStringTag = "!!str"
-	argumentKey   = "args"
+	maxFileSize          = 1 << 20
+	maxInputSize         = 32 << 20
+	maxArgumentInputSize = 8 << 20
+	maxYAMLNodes         = 20_000
+	maxYAMLDepth         = 64
+	yamlStringTag        = "!!str"
+	argumentKey          = "args"
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -404,25 +405,11 @@ func validateArgumentDefinition(name string, declaration argumentDeclaration) er
 }
 
 func resolveArgumentValues(arguments map[string]argumentDeclaration, overrides ArgumentOverrides) ([]string, map[string]string, error) {
-	provided := make(map[string]string)
-	defer clear(provided)
-	for _, path := range overrides.Files {
-		values, err := readArgumentFile(path)
-		if err != nil {
-			return nil, nil, err
-		}
-		for name, value := range values {
-			provided[name] = value
-		}
-	}
-	cliValues := make(map[string]string)
-	defer clear(cliValues)
-	if err := parseArgumentValues(overrides.Values, cliValues); err != nil {
+	provided, err := collectArgumentOverrides(overrides)
+	if err != nil {
 		return nil, nil, err
 	}
-	for name, value := range cliValues {
-		provided[name] = value
-	}
+	defer clear(provided)
 	for name := range provided {
 		if _, ok := arguments[name]; !ok {
 			return nil, nil, errors.New("value supplied for an undeclared environment argument")
@@ -447,6 +434,53 @@ func resolveArgumentValues(arguments map[string]argumentDeclaration, overrides A
 	}
 	sort.Strings(names)
 	return names, values, nil
+}
+
+func collectArgumentOverrides(overrides ArgumentOverrides) (map[string]string, error) {
+	provided := make(map[string]string)
+	inputSize := 0
+	for _, path := range overrides.Files {
+		values, size, err := readArgumentFile(path)
+		if err != nil {
+			clear(provided)
+			return nil, err
+		}
+		inputSize += size
+		if inputSize > maxArgumentInputSize {
+			clear(values)
+			clear(provided)
+			return nil, errors.New("combined environment argument files exceed size limit")
+		}
+		for name, value := range values {
+			provided[name] = value
+		}
+		clear(values)
+		if len(provided) > maxYAMLNodes {
+			clear(provided)
+			return nil, errors.New("too many environment argument values")
+		}
+	}
+	cliValues := make(map[string]string)
+	defer clear(cliValues)
+	for _, value := range overrides.Values {
+		inputSize += len(value)
+		if inputSize > maxArgumentInputSize {
+			clear(provided)
+			return nil, errors.New("combined environment argument values exceed size limit")
+		}
+	}
+	if err := parseArgumentValues(overrides.Values, cliValues); err != nil {
+		clear(provided)
+		return nil, err
+	}
+	for name, value := range cliValues {
+		provided[name] = value
+	}
+	if len(provided) > maxYAMLNodes {
+		clear(provided)
+		return nil, errors.New("too many environment argument values")
+	}
+	return provided, nil
 }
 
 func decodeArgumentDefinitions(root *yaml.Node) (map[string]argumentDeclaration, error) {
@@ -719,22 +753,22 @@ func parseArgumentValues(values []string, destination map[string]string) error {
 	return nil
 }
 
-func readArgumentFile(path string) (map[string]string, error) {
+func readArgumentFile(path string) (map[string]string, int, error) {
 	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("environment argument file path is required")
+		return nil, 0, errors.New("environment argument file path is required")
 	}
 	file, err := os.Open(path) // #nosec G304 -- path is an explicit user-selected argument file
 	if err != nil {
-		return nil, errors.New("open environment argument file")
+		return nil, 0, errors.New("open environment argument file")
 	}
 	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("environment argument file must be a regular file")
+		return nil, 0, errors.New("environment argument file must be a regular file")
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
 	if err != nil || len(data) > maxFileSize {
-		return nil, errors.New("read environment argument file")
+		return nil, 0, errors.New("read environment argument file")
 	}
 	values := make(map[string]string)
 	for _, line := range strings.Split(string(data), "\n") {
@@ -744,10 +778,11 @@ func readArgumentFile(path string) (map[string]string, error) {
 			continue
 		}
 		if err := parseArgumentValues([]string{line}, values); err != nil {
-			return nil, err
+			clear(values)
+			return nil, 0, err
 		}
 	}
-	return values, nil
+	return values, len(data), nil
 }
 
 func validatePorts(ports []portMapping) error {
