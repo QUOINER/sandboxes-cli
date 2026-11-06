@@ -71,11 +71,23 @@ func TestLoadBoundsInputSizeAndRequiresExplicitPath(t *testing.T) {
 	}
 }
 
+func TestDecodeDocumentRejectsAliasesAndDeepNesting(t *testing.T) {
+	alias := []byte("schemaVersion: \"1\"\nagent: &agent shell\nname: *agent\n")
+	if _, err := decodeDocument(alias); err == nil || !strings.Contains(err.Error(), "aliases") {
+		t.Fatalf("alias input error = %v, want alias rejection", err)
+	}
+	deep := "schemaVersion: \"1\"\nagent: shell\nsandboxOptions:\n  nested: " + strings.Repeat("[", maxYAMLDepth) + "x" + strings.Repeat("]", maxYAMLDepth) + "\n"
+	if _, err := decodeDocument([]byte(deep)); err == nil || !strings.Contains(err.Error(), "nesting") {
+		t.Fatalf("deep input error = %v, want nesting rejection", err)
+	}
+}
+
 func FuzzDecodeDocument(f *testing.F) {
 	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\nenv:\n  API_TOKEN: secret\n"))
 	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\nworkspace:\n  path: work\n"))
 	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\n---\nsecond: document\n"))
 	f.Add([]byte("{invalid yaml"))
+	f.Add([]byte("schemaVersion: \"1\"\nagent: &agent shell\nname: *agent\n"))
 	f.Add([]byte(strings.Repeat("x", maxFileSize+1)))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		doc, err := decodeDocument(data)

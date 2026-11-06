@@ -15,7 +15,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const maxFileSize = 1 << 20
+const (
+	maxFileSize  = 1 << 20
+	maxYAMLNodes = 20_000
+	maxYAMLDepth = 64
+)
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
@@ -293,16 +297,51 @@ func decodeDocument(data []byte) (document, error) {
 		return document{}, errors.New("read environment file")
 	}
 	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	var root yaml.Node
+	if err := decoder.Decode(&root); err != nil {
+		return document{}, errors.New("environment file has invalid YAML or unsupported fields")
+	}
+	if err := validateYAMLTree(&root); err != nil {
+		return document{}, err
+	}
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return document{}, errors.New("environment file must contain exactly one YAML document")
+	}
+	decoder = yaml.NewDecoder(strings.NewReader(string(data)))
 	decoder.KnownFields(true)
 	var doc document
 	if err := decoder.Decode(&doc); err != nil {
 		return document{}, errors.New("environment file has invalid YAML or unsupported fields")
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document{}, errors.New("environment file must contain exactly one YAML document")
-	}
 	return doc, nil
+}
+
+func validateYAMLTree(root *yaml.Node) error {
+	type pendingNode struct {
+		node  *yaml.Node
+		depth int
+	}
+	pending := []pendingNode{{node: root, depth: 1}}
+	nodes := 0
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		nodes++
+		if nodes > maxYAMLNodes {
+			return errors.New("environment file has too many YAML nodes")
+		}
+		if current.depth > maxYAMLDepth {
+			return errors.New("environment file YAML nesting is too deep")
+		}
+		if current.node.Kind == yaml.AliasNode {
+			return errors.New("YAML aliases are unsupported in environment files")
+		}
+		for _, child := range current.node.Content {
+			pending = append(pending, pendingNode{node: child, depth: current.depth + 1})
+		}
+	}
+	return nil
 }
 
 func resolveWorkspace(filePath, path string) (string, error) {
