@@ -438,11 +438,19 @@ func TestDecodeDocumentRejectsAliasesAndDeepNesting(t *testing.T) {
 func FuzzDecodeDocument(f *testing.F) {
 	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\nenv:\n  API_TOKEN: secret\n"))
 	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\nworkspace:\n  path: work\n"))
+	f.Add([]byte("schemaVersion: \"1\"\nname: ${{ env.args.name }}\nadditionalWorkspaces:\n  - path: ${{ env.args.path }}\nports:\n  - sandbox: ${{ env.args.port }}\nargs:\n  name:\n    default: sandbox\n"))
 	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\n---\nsecond: document\n"))
 	f.Add([]byte("{invalid yaml"))
 	f.Add([]byte("schemaVersion: \"1\"\nagent: &agent shell\nname: *agent\n"))
 	f.Add([]byte(strings.Repeat("x", maxFileSize+1)))
 	f.Fuzz(func(t *testing.T, data []byte) {
+		root, err := decodeDocumentNodeFromBytes(data)
+		if err == nil {
+			_ = findArgumentReferenceUsage(root)
+		}
+		if err != nil {
+			return
+		}
 		doc, err := decodeDocument(data)
 		if err == nil {
 			_ = doc.validate()
