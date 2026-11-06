@@ -21,15 +21,18 @@ import (
 const (
 	runUsage = `usage: rsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]
 
-Create a sandbox (or reuse one by --name), start it, and attach to an agent.
+Create a local sandbox, start it, and attach to an agent. This command uses the
+local Rheic daemon; cloud sandboxes and remote/OCI kits are not supported here.
 The default workspace is the current directory. Pass additional workspace paths
-after PATH; append :ro to make a workspace read-only. With --detach the sandbox
-is created and started, and its ID is printed without attaching.
+after PATH; append :ro to make a workspace read-only. A single-file read-only
+workspace is supported. Agent arguments after -- are passed to the agent.
 
-When no --name is given, the sandbox is named <agent>-<workspace-basename>.
-If that sandbox already exists it is reused: the CLI prompts on a terminal
-and reuses without prompting when stdin is not a terminal; --new always
-creates a fresh sandbox instead.
+Without --name, the sandbox name is <agent>-<workspace-basename>. An existing
+sandbox with that name is reused: on a terminal, rsbx asks first; without a
+terminal, it reuses automatically. --new always creates a fresh sandbox.
+With --name, rsbx reuses and restarts that sandbox unless --new is also set.
+With --detach, rsbx creates or starts the sandbox, prints its ID, and exits.
+--rm removes the sandbox after the attached agent session exits.
 
 Agents:
   kimi                      available (Rheic extension)
@@ -57,6 +60,13 @@ Flags:
       --env-file FILE             read environment overrides from a file (repeatable)
       --rm                        remove the sandbox after the agent session exits
   -h, --help                      help for run
+
+Examples:
+  rsbx run shell
+  rsbx run codex ./project /path/to/docs:ro
+  rsbx run shell -- --version
+  rsbx run --name dev-shell --detach shell
+  rsbx run --new --name clean-shell --detach shell
 `
 
 	shellAgent        = "shell"
