@@ -71,6 +71,20 @@ func TestLoadBoundsInputSizeAndRequiresExplicitPath(t *testing.T) {
 	}
 }
 
+func FuzzDecodeDocument(f *testing.F) {
+	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\nenv:\n  API_TOKEN: secret\n"))
+	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\nworkspace:\n  path: work\n"))
+	f.Add([]byte("schemaVersion: \"1\"\nagent: shell\n---\nsecond: document\n"))
+	f.Add([]byte("{invalid yaml"))
+	f.Add([]byte(strings.Repeat("x", maxFileSize+1)))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		doc, err := decodeDocument(data)
+		if err == nil {
+			_ = doc.validate()
+		}
+	})
+}
+
 func writeEnvFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {

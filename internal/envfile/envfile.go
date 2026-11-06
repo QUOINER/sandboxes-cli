@@ -285,6 +285,13 @@ func readDocument(path string) (document, error) {
 	if err != nil || len(data) > maxFileSize {
 		return document{}, errors.New("read environment file")
 	}
+	return decodeDocument(data)
+}
+
+func decodeDocument(data []byte) (document, error) {
+	if len(data) > maxFileSize {
+		return document{}, errors.New("read environment file")
+	}
 	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
 	decoder.KnownFields(true)
 	var doc document
