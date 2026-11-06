@@ -133,6 +133,10 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 	command := fs.String("command", "", "absolute or PATH-resolved local stdio executable")
 	directory := fs.String("dir", "", "working directory")
 	fs.Var(&serverArgs, "args", "comma-separated MCP executable arguments (repeatable)")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "Usage: rsbx mcp add NAME --command EXECUTABLE [--args ARG] [--dir PATH]")
+		_, _ = fmt.Fprintln(fs.Output(), "Runs the registered stdio server on the host after daemon approval. Command arguments are stored as local metadata; do not put secrets in them.")
+	}
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{"--command": true, "--dir": true, "--args": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -221,6 +225,10 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("mcp call", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	fs.StringVar(&raw, "args", "{}", "JSON object passed to the tool")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "Usage: rsbx mcp call SANDBOX SERVER TOOL [--args JSON]")
+		_, _ = fmt.Fprintln(fs.Output(), "Requests daemon-trusted approval before invoking the host MCP server. Argument values are hidden in the prompt; do not pass secrets.")
+	}
 	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{"--args": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -231,13 +239,9 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp call SANDBOX SERVER TOOL [--args JSON]")
 		return 2
 	}
-	if len(raw) > 16<<10 {
-		_, _ = fmt.Fprintln(r.Err, "mcp call: approval display is limited to 16 KiB of arguments")
-		return 2
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &object); err != nil || object == nil {
-		_, _ = fmt.Fprintln(r.Err, "mcp call: --args must be a JSON object")
+	object, err := validateMCPCallArguments(raw)
+	if err != nil {
+		_, _ = fmt.Fprintln(r.Err, err)
 		return 2
 	}
 	if err := requireMCPApprovalTerminal(r.In); err != nil {
@@ -278,6 +282,17 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 	}
 	_, _ = fmt.Fprintln(r.Out, string(result))
 	return 0
+}
+
+func validateMCPCallArguments(raw string) (map[string]json.RawMessage, error) {
+	if len(raw) > 16<<10 {
+		return nil, errors.New("mcp call: approval display is limited to 16 KiB of arguments")
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &object); err != nil || object == nil {
+		return nil, errors.New("mcp call: --args must be a JSON object")
+	}
+	return object, nil
 }
 
 func mcpCallApprovalMessage(server, tool, sandbox string, arguments map[string]json.RawMessage) string {

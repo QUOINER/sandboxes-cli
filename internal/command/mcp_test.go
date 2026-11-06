@@ -91,6 +91,18 @@ func TestMCPApprovalPromptsHideArgumentValues(t *testing.T) {
 	}
 }
 
+func TestMCPHostCommandsDocumentSecretAndApprovalLimits(t *testing.T) {
+	var out, stderr strings.Builder
+	runner := &Runner{Out: &out, Err: &stderr, In: strings.NewReader("")}
+	if code := runner.Run(context.Background(), []string{"mcp", "add", "--help"}); code != 0 || !strings.Contains(stderr.String(), "do not put secrets") {
+		t.Fatalf("mcp add help code=%d stderr=%q", code, stderr.String())
+	}
+	stderr.Reset()
+	if code := runner.Run(context.Background(), []string{"mcp", "call", "--help"}); code != 0 || !strings.Contains(stderr.String(), "values are hidden") {
+		t.Fatalf("mcp call help code=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func TestMCPCallAndRegistrationNeverApproveWithoutTerminal(t *testing.T) {
 	service := &fakeMCPService{challenge: true}
 	clientCalls := 0
