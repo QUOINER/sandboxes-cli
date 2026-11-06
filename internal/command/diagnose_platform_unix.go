@@ -4,22 +4,10 @@ package command
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 )
-
-// virtualizationSupport reports whether the host exposes a hypervisor.
-func virtualizationSupport() (bool, string) {
-	if data, err := syscall.Sysctl("kern.hv_support"); err == nil && data != "" && data[0] == 1 {
-		return true, "kern.hv_support is 1"
-	}
-	if _, err := os.Stat("/dev/kvm"); err == nil {
-		return true, "/dev/kvm is present"
-	}
-	return false, "no hypervisor support detected (kern.hv_support missing, /dev/kvm absent)"
-}
 
 // checkDiskSpace reports free space on the state directory's volume.
 func checkDiskSpace(stateDir string) diagnoseCheck {
