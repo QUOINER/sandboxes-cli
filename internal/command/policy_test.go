@@ -131,6 +131,12 @@ func (p *policyUpdateClient) MutateGlobalPolicy(context.Context, string, sdk.Net
 	return nil, nil, nil
 }
 
+func (p *policyUpdateClient) Refresh(context.Context) (int, error) { return 0, nil }
+
+func (p *policyUpdateClient) ResetGlobal(context.Context) ([]sdk.NetworkRule, []sdk.NetworkRule, string, error) {
+	return nil, nil, "deny-all", nil
+}
+
 func (p *policyUpdateClient) MutatePolicy(ctx context.Context, id, action string, rule sdk.NetworkRule) (*sdk.Sandbox, error) {
 	allow := append([]sdk.NetworkRule(nil), p.base.items[0].Allow...)
 	deny := append([]sdk.NetworkRule(nil), p.base.items[0].Deny...)
@@ -294,6 +300,12 @@ func (f fakePolicyCheck) SetPolicyProfile(_ context.Context, p string) (string, 
 func (f fakePolicyCheck) GetGlobalPolicy(context.Context) ([]sdk.NetworkRule, []sdk.NetworkRule, error) {
 	return nil, nil, nil
 }
+func (f fakePolicyCheck) Refresh(context.Context) (int, error) { return 0, nil }
+
+func (f fakePolicyCheck) ResetGlobal(context.Context) ([]sdk.NetworkRule, []sdk.NetworkRule, string, error) {
+	return nil, nil, "deny-all", nil
+}
+
 func (f fakePolicyCheck) MutateGlobalPolicy(context.Context, string, sdk.NetworkRule) ([]sdk.NetworkRule, []sdk.NetworkRule, error) {
 	return nil, nil, &sdk.Error{Code: "unsupported", Message: "global policy is not supported by this client"}
 }

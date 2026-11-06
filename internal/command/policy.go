@@ -66,9 +66,9 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 	case "log":
 		return r.policyLog(ctx, args[1:])
 	case "refresh":
-		return r.policyUnsupported("refresh", "governance polling is not implemented; policy changes apply on the next sandbox network reload")
+		return r.policyRefresh(ctx, args[1:])
 	case commandReset:
-		return r.policyUnsupported(commandReset, "resetting the policy store requires daemon support and is not implemented")
+		return r.policyReset(ctx, args[1:])
 	case "approval":
 		return r.policyUnsupported("approval", "approval-gated operations are not implemented, so no approvals can be pending")
 	case helpCommand, helpShort, helpFlag:
@@ -79,6 +79,92 @@ func (r *Runner) policy(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprint(r.Err, policyUsage)
 		return 2
 	}
+}
+
+// policyRefresh forces the daemon to re-apply effective policy to running
+// sandboxes immediately.
+func (r *Runner) policyRefresh(ctx context.Context, args []string) int {
+	if len(args) != 0 {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy refresh")
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	applied, err := sdk.Policies(client).Refresh(ctx)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(r.Out, "refreshed policy on %d running sandbox(s)\n", applied)
+	return 0
+}
+
+// policyReset removes all custom global rules and restores the default
+// profile. Sandbox-scoped rules are kept. Confirmation is required unless
+// --force is given.
+func (r *Runner) policyReset(ctx context.Context, args []string) int {
+	force := false
+	for _, arg := range args {
+		if arg == "--force" || arg == "-f" {
+			force = true
+			continue
+		}
+		if arg == helpFlag || arg == helpShort {
+			_, _ = fmt.Fprintln(r.Out, "usage: rsbx policy reset [--force]")
+			return 0
+		}
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx policy reset [--force]")
+		return 2
+	}
+	client, err := r.client()
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	defer func() { _ = client.Close() }()
+	policies := sdk.Policies(client)
+	allow, deny, err := policies.GetGlobalPolicy(ctx)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	if !force && len(allow)+len(deny) > 0 {
+		confirmed, err := r.confirmResetPolicy(len(allow) + len(deny))
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(r.Out, "reset canceled")
+			return 0
+		}
+	}
+	remainingAllow, remainingDeny, profile, err := policies.ResetGlobal(ctx)
+	if err != nil {
+		r.error(err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(r.Out, "reset global policy (profile=%s, allow=%d, deny=%d)\n", profile, len(remainingAllow), len(remainingDeny))
+	return 0
+}
+
+func (r *Runner) confirmResetPolicy(count int) (bool, error) {
+	if _, err := fmt.Fprintf(r.Err, "Remove all %d custom global policy rule(s)? Sandbox rules are kept. [y/N] ", count); err != nil {
+		return false, err
+	}
+	var answer string
+	if _, err := fmt.Fscanln(r.In, &answer); err != nil {
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		return false, err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == answerYes || answer == answerShortYes, nil
 }
 
 func (r *Runner) policyUnsupported(name, reason string) int {
