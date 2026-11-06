@@ -79,6 +79,18 @@ func TestMCPArgsFlagUsesCSVQuoting(t *testing.T) {
 	}
 }
 
+func TestMCPApprovalPromptsHideArgumentValues(t *testing.T) {
+	callArgs := map[string]json.RawMessage{"query": json.RawMessage(`"synthetic-secret"`), "limit": json.RawMessage(`2`)}
+	callPrompt := mcpCallApprovalMessage("fixture", "search", "sb-owned", callArgs)
+	if strings.Contains(callPrompt, "synthetic-secret") || !strings.Contains(callPrompt, "argument fields: 2 (values hidden)") {
+		t.Fatalf("call prompt exposed values or omitted count: %q", callPrompt)
+	}
+	registrationPrompt := mcpRegistrationApprovalMessage("fixture", "/usr/bin/fixture", []string{"--value", "synthetic-secret", "--stdio"}, "/tmp")
+	if strings.Contains(registrationPrompt, "synthetic-secret") || !strings.Contains(registrationPrompt, "argument count: 3 (values hidden") {
+		t.Fatalf("registration prompt exposed values or omitted count: %q", registrationPrompt)
+	}
+}
+
 func TestMCPCallAndRegistrationNeverApproveWithoutTerminal(t *testing.T) {
 	service := &fakeMCPService{challenge: true}
 	clientCalls := 0

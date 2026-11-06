@@ -195,7 +195,7 @@ func (r *Runner) registerMCPServer(ctx context.Context, client sdk.Client, name,
 	if registration == nil || !registration.ApprovalRequired || registration.ApprovalID == "" {
 		return errors.New("daemon returned an invalid MCP registration challenge")
 	}
-	message := fmt.Sprintf("Register host MCP server %q\n  command: %s\n  args: %q\n  directory: %s", name, command, args, directory)
+	message := mcpRegistrationApprovalMessage(name, command, args, directory)
 	approved, err := r.confirmMCPApproval(message)
 	if err != nil {
 		return err
@@ -210,6 +210,10 @@ func (r *Runner) registerMCPServer(ctx context.Context, client sdk.Client, name,
 	}
 	_, err = fmt.Fprintf(r.Out, "Registered MCP server %s\n", server.Name)
 	return err
+}
+
+func mcpRegistrationApprovalMessage(name, command string, args []string, directory string) string {
+	return fmt.Sprintf("Register host MCP server %q\n  command: %s\n  argument count: %d (values hidden; do not configure secrets here)\n  directory: %s", name, command, len(args), directory)
 }
 
 func (r *Runner) mcpCall(ctx context.Context, args []string) int {
@@ -257,7 +261,7 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 		r.error(err)
 		return 1
 	}
-	message := fmt.Sprintf("Run host MCP tool %s.%s in sandbox %s?\n  arguments: %s", fs.Arg(1), fs.Arg(2), fs.Arg(0), raw)
+	message := mcpCallApprovalMessage(fs.Arg(1), fs.Arg(2), fs.Arg(0), object)
 	approved, confirmErr := r.confirmMCPApproval(message)
 	if confirmErr != nil {
 		r.error(confirmErr)
@@ -274,6 +278,10 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 	}
 	_, _ = fmt.Fprintln(r.Out, string(result))
 	return 0
+}
+
+func mcpCallApprovalMessage(server, tool, sandbox string, arguments map[string]json.RawMessage) string {
+	return fmt.Sprintf("Request trusted host approval to run MCP tool %s.%s in sandbox %s?\n  argument fields: %d (values hidden)", server, tool, sandbox, len(arguments))
 }
 
 func (r *Runner) mcpRemove(ctx context.Context, args []string) int {
