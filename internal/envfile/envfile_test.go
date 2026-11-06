@@ -16,7 +16,7 @@ func TestLoadMergesFilesAndDiscardsEnvironmentValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeEnvFile(t, first, "schemaVersion: \"1\"\nname: before\nagent: shell\nworkspace: work\nenv:\n  TOKEN: secret-one\n  SHARED: old\nsandboxOptions:\n  cpus: 2\n")
-	writeEnvFile(t, filepath.Join(secondDir, "sbxenv.yaml"), "schemaVersion: \"1\"\nname: after\nworkspace:\n  path: /tmp/override\nadditionalWorkspaces:\n  - path: data\n    readOnly: true\nenv:\n  SHARED: secret-two\n  SECOND: value\nsandboxOptions:\n  memory: 2g\n")
+	writeEnvFile(t, filepath.Join(secondDir, "sbxenv.yaml"), "schemaVersion: \"1\"\nname: after\nworkspace:\n  path: override\nadditionalWorkspaces:\n  - path: data\n    readOnly: true\nenv:\n  SHARED: secret-two\n  SECOND: value\nsandboxOptions:\n  memory: 2g\n")
 
 	plan, err := Load([]string{first, secondDir})
 	if err != nil {
@@ -25,7 +25,7 @@ func TestLoadMergesFilesAndDiscardsEnvironmentValues(t *testing.T) {
 	if plan.Name != "after" || plan.Agent != "shell" {
 		t.Fatalf("unexpected merged identity: %#v", plan)
 	}
-	if plan.Workspace != "/tmp/override" {
+	if plan.Workspace != filepath.Join(secondDir, "override") {
 		t.Fatalf("workspace = %q", plan.Workspace)
 	}
 	if len(plan.AdditionalWorkspaces) != 1 || plan.AdditionalWorkspaces[0] != (Workspace{Path: filepath.Join(secondDir, "data"), ReadOnly: true}) {
