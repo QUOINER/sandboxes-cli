@@ -29,6 +29,34 @@ func TestEnvironmentPlanIsReadOnlyAndRedactsValues(t *testing.T) {
 	}
 }
 
+func TestEnvironmentPlanArgumentOverridesAreRedacted(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "sbxenv.yaml")
+	argumentFile := filepath.Join(root, "args.txt")
+	body := "schemaVersion: \"1\"\nagent: shell\nargs:\n  mode:\n    default: stable-secret-default\n    enum: [stable-secret-default, beta-secret]\n  api_key:\n    required: true\n    pattern: '[a-z-]+'\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(argumentFile, []byte("mode=invalid-file-value\napi_key=file-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	runner := NewRunner(&stdout, &stderr)
+	args := []string{"env", "plan", path, "--env-args-file", argumentFile, "--env-arg", "mode=beta-secret", "--env-arg", "api_key=cli-secret"}
+	if code := runner.Run(context.Background(), args); code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, secret := range []string{"stable-secret-default", "invalid-file-value", "file-secret", "beta-secret", "cli-secret"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("environment argument value leaked: %q", output)
+		}
+	}
+	if !strings.Contains(output, "mode=<redacted>") || !strings.Contains(output, "api_key=<redacted>") {
+		t.Fatalf("argument names were not shown with redacted values: %q", output)
+	}
+}
+
 func TestEnvironmentPlanEscapesWorkspaceControlCharacters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
 	body := "schemaVersion: \"1\"\nagent: shell\nworkspace: \"line\\nINJECT\"\n"

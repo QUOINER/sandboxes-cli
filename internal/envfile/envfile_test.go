@@ -172,6 +172,67 @@ func TestLoadAllowsExpandedDirectoryWithReferenceSyntaxInName(t *testing.T) {
 	}
 }
 
+func TestLoadValidatesDeclaredArgumentsWithoutRetainingValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nargs:\n  channel:\n    default: stable\n    enum: [stable, preview]\n  build:\n    required: true\n    pattern: '[A-Z0-9]+'\n")
+	argumentFile := filepath.Join(t.TempDir(), "args.txt")
+	writeEnvFile(t, argumentFile, "build=BUILD42\n")
+
+	plan, err := LoadWithArguments([]string{path}, ArgumentOverrides{
+		Files:  []string{argumentFile},
+		Values: []string{"channel=preview", "build=CLI77"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(plan.ArgumentNames, []string{"build", "channel"}) {
+		t.Fatalf("argument names = %#v", plan.ArgumentNames)
+	}
+	if plan.arguments != nil {
+		t.Fatal("argument declarations/default values were retained in returned plan")
+	}
+}
+
+func TestLoadArgumentDefaultsAndFilesOverrideInOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nargs:\n  mode:\n    default: stable\n    enum: [stable, preview, nightly]\n")
+	first := filepath.Join(t.TempDir(), "first.args")
+	second := filepath.Join(t.TempDir(), "second.args")
+	writeEnvFile(t, first, "mode=not-in-enum\n")
+	writeEnvFile(t, second, "mode=nightly\n")
+	plan, err := LoadWithArguments([]string{path}, ArgumentOverrides{Files: []string{first, second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(plan.ArgumentNames, []string{"mode"}) {
+		t.Fatalf("argument names = %#v", plan.ArgumentNames)
+	}
+}
+
+func TestLoadRejectsInvalidArgumentDeclarationsAndValues(t *testing.T) {
+	cases := map[string]struct {
+		document string
+		values   []string
+	}{
+		"missing required value": {document: "args:\n  channel:\n    required: true\n"},
+		"enum mismatch":          {document: "args:\n  channel:\n    default: stable\n    enum: [stable, preview]\n", values: []string{"channel=nightly"}},
+		"pattern mismatch":       {document: "args:\n  build:\n    required: true\n    pattern: '[A-Z]+'\n", values: []string{"build=lower"}},
+		"undeclared value":       {document: "args:\n  channel:\n    default: stable\n", values: []string{"extra=value"}},
+		"invalid pair syntax":    {document: "args:\n  channel:\n    default: stable\n", values: []string{"not-a-pair"}},
+		"default and required":   {document: "args:\n  channel:\n    default: stable\n    required: true\n"},
+		"enum and pattern":       {document: "args:\n  channel:\n    default: stable\n    enum: [stable]\n    pattern: stable\n"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+			writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\n"+testCase.document)
+			if _, err := LoadWithArguments([]string{path}, ArgumentOverrides{Values: testCase.values}); err == nil {
+				t.Fatal("LoadWithArguments() succeeded; want rejection")
+			}
+		})
+	}
+}
+
 func TestLoadRejectsUnsupportedFieldsAndMalformedDocuments(t *testing.T) {
 	cases := map[string]string{
 		"unknown field":           "schemaVersion: \"1\"\nagent: shell\nsecretSource: host\n",
@@ -230,6 +291,22 @@ func FuzzDecodeDocument(f *testing.F) {
 		doc, err := decodeDocument(data)
 		if err == nil {
 			_ = doc.validate()
+		}
+	})
+}
+
+func FuzzParseArgumentValues(f *testing.F) {
+	f.Add("CHANNEL=preview")
+	f.Add("missing-separator")
+	f.Add("API_KEY=one=two")
+	f.Fuzz(func(t *testing.T, value string) {
+		values := make(map[string]string)
+		if err := parseArgumentValues([]string{value}, values); err == nil {
+			for name := range values {
+				if !argumentIdentifier.MatchString(name) {
+					t.Fatalf("accepted invalid argument name %q", name)
+				}
+			}
 		}
 	})
 }

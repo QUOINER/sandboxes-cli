@@ -12,6 +12,17 @@ import (
 
 const previewDefault = "default"
 
+type repeatedStringFlag []string
+
+func (f *repeatedStringFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *repeatedStringFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 func (r *Runner) environment(args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env plan [PATH...]\n\nCreate a static, read-only preview from the current directory and optional user defaults, or from explicit sbxenv.yaml paths. Explicit paths skip user defaults.\nWorkspace paths and declared ports are previewed; no sandbox is created, changed, or queried. Environment values are never displayed.\nApply, create, run, exec, and rm are unsupported.\n")
@@ -24,16 +35,20 @@ func (r *Runner) environment(args []string) int {
 	fs := flag.NewFlagSet("env plan", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	name := fs.String("name", "", "override the environment sandbox name")
+	var envArguments, envArgumentFiles repeatedStringFlag
+	fs.Var(&envArguments, "env-arg", "value for an argument declared in sbxenv.yaml (repeatable)")
+	fs.Var(&envArgumentFiles, "env-args-file", "file of name=value environment arguments (repeatable)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nWorkspace paths expand env.projectDir and env.fileDir references. Declared ports are validated and displayed without opening sockets.\n  --name NAME  override the sandbox name\n\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
+		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...] [flags]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nWorkspace paths expand env.projectDir and env.fileDir references. Declared ports are validated and displayed without opening sockets. Argument values are validated and redacted; env.args interpolation and kit arguments are unsupported.\n  --name NAME                 override the sandbox name\n  --env-arg name=value        set a declared environment argument (repeatable; overrides files)\n  --env-args-file PATH        read name=value arguments (repeatable)\n\nValues passed through --env-arg may be visible in host process listings; use --env-args-file for sensitive values. This is a static preview only; it does not apply changes or inspect daemon state.\n")
 	}
-	if err := fs.Parse(reorderFlagArgs(args[1:], map[string]bool{"--name": true})); err != nil {
+	valueFlags := map[string]bool{"--name": true, "--env-arg": true, "--env-args-file": true}
+	if err := fs.Parse(reorderFlagArgs(args[1:], valueFlags)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("env plan", err)
 	}
-	plan, err := loadEnvironmentPlan(fs.Args())
+	plan, err := loadEnvironmentPlan(fs.Args(), envfile.ArgumentOverrides{Files: envArgumentFiles, Values: envArguments})
 	if err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx env plan: %s\n", err)
 		return 1
@@ -55,10 +70,8 @@ func (r *Runner) environment(args []string) int {
 		fmt.Fprintf(&out, "  %q (%s)\n", workspace.Path, mode)
 	}
 	writePortPreview(&out, plan.Ports)
-	fmt.Fprintf(&out, "Environment keys: %d\n", len(plan.EnvironmentKeys))
-	for _, key := range plan.EnvironmentKeys {
-		fmt.Fprintf(&out, "  %s=<redacted>\n", key)
-	}
+	writeRedactedNames(&out, "Environment keys", plan.EnvironmentKeys)
+	writeRedactedNames(&out, "Environment arguments", plan.ArgumentNames)
 	if plan.CPUs != nil {
 		fmt.Fprintf(&out, "CPUs: %d\n", *plan.CPUs)
 	}
@@ -91,6 +104,13 @@ func writePortPreview(out *strings.Builder, ports []envfile.Port) {
 	}
 }
 
+func writeRedactedNames(out *strings.Builder, label string, names []string) {
+	fmt.Fprintf(out, "%s: %d\n", label, len(names))
+	for _, name := range names {
+		fmt.Fprintf(out, "  %s=<redacted>\n", name)
+	}
+}
+
 func applyEnvironmentName(plan *envfile.Plan, name string) error {
 	if name == "" {
 		return nil
@@ -102,9 +122,9 @@ func applyEnvironmentName(plan *envfile.Plan, name string) error {
 	return nil
 }
 
-func loadEnvironmentPlan(paths []string) (envfile.Plan, error) {
+func loadEnvironmentPlan(paths []string, overrides envfile.ArgumentOverrides) (envfile.Plan, error) {
 	if len(paths) > 0 {
-		return envfile.Load(paths)
+		return envfile.LoadWithArguments(paths, overrides)
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -114,7 +134,7 @@ func loadEnvironmentPlan(paths []string) (envfile.Plan, error) {
 	if err != nil {
 		return envfile.Plan{}, errors.New("resolve default environment paths")
 	}
-	return envfile.LoadDefault(homeDir, workingDir)
+	return envfile.LoadDefaultWithArguments(homeDir, workingDir, overrides)
 }
 
 func displayValue(value string) string {

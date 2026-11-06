@@ -23,6 +23,7 @@ const (
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+var argumentIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 var directoryReference = regexp.MustCompile(`\$\{\{\s*env\.([A-Za-z][A-Za-z0-9]*)\s*\}\}`)
 
 // ValidateName checks a name before the CLI applies a command-line override.
@@ -48,20 +49,30 @@ type Plan struct {
 	Workspace            string
 	AdditionalWorkspaces []Workspace
 	Ports                []Port
+	ArgumentNames        []string
 	EnvironmentKeys      []string
 	CPUs                 *uint32
 	Memory               string
+	arguments            map[string]argumentDeclaration
+}
+
+// ArgumentOverrides contains values read from argument files followed by
+// command-line values. Command-line values take precedence.
+type ArgumentOverrides struct {
+	Files  []string
+	Values []string
 }
 
 type document struct {
-	SchemaVersion        string            `yaml:"schemaVersion"`
-	Name                 string            `yaml:"name"`
-	Agent                string            `yaml:"agent"`
-	Workspace            workspaceValue    `yaml:"workspace"`
-	AdditionalWorkspaces []workspaceMount  `yaml:"additionalWorkspaces"`
-	Ports                []portMapping     `yaml:"ports"`
-	Env                  map[string]string `yaml:"env"`
-	SandboxOptions       sandboxOptions    `yaml:"sandboxOptions"`
+	SchemaVersion        string                         `yaml:"schemaVersion"`
+	Name                 string                         `yaml:"name"`
+	Agent                string                         `yaml:"agent"`
+	Workspace            workspaceValue                 `yaml:"workspace"`
+	AdditionalWorkspaces []workspaceMount               `yaml:"additionalWorkspaces"`
+	Ports                []portMapping                  `yaml:"ports"`
+	Args                 map[string]argumentDeclaration `yaml:"args"`
+	Env                  map[string]string              `yaml:"env"`
+	SandboxOptions       sandboxOptions                 `yaml:"sandboxOptions"`
 }
 
 type workspaceValue struct {
@@ -116,6 +127,14 @@ type portMapping struct {
 	HostIP   string  `yaml:"hostIP"`
 }
 
+type argumentDeclaration struct {
+	Default     *string  `yaml:"default"`
+	Required    *bool    `yaml:"required"`
+	Description *string  `yaml:"description"`
+	Enum        []string `yaml:"enum"`
+	Pattern     *string  `yaml:"pattern"`
+}
+
 type sandboxOptions struct {
 	CPUs   *uint32 `yaml:"cpus"`
 	Memory string  `yaml:"memory"`
@@ -124,6 +143,12 @@ type sandboxOptions struct {
 // Load resolves one or more explicit files. A directory means
 // <directory>/sbxenv.yaml. Files are validated before they are merged.
 func Load(paths []string) (Plan, error) {
+	return LoadWithArguments(paths, ArgumentOverrides{})
+}
+
+// LoadWithArguments resolves explicit files and applies transient argument
+// overrides without retaining or returning any argument values.
+func LoadWithArguments(paths []string, overrides ArgumentOverrides) (Plan, error) {
 	if len(paths) == 0 {
 		return Plan{}, errors.New("an explicit environment file or directory is required")
 	}
@@ -131,10 +156,10 @@ func Load(paths []string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	return load(paths, filepath.Dir(firstFile))
+	return load(paths, filepath.Dir(firstFile), overrides)
 }
 
-func load(paths []string, projectDir string) (Plan, error) {
+func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan, error) {
 	var plan Plan
 	for _, path := range paths {
 		filePath, err := resolveFile(path)
@@ -156,7 +181,12 @@ func load(paths []string, projectDir string) (Plan, error) {
 	if plan.Agent == "" {
 		return Plan{}, errors.New("environment requires an agent")
 	}
+	if err := applyArgumentOverrides(&plan, overrides); err != nil {
+		return Plan{}, err
+	}
+	plan.arguments = nil
 	sort.Strings(plan.EnvironmentKeys)
+	sort.Strings(plan.ArgumentNames)
 	return plan, nil
 }
 
@@ -164,6 +194,12 @@ func load(paths []string, projectDir string) (Plan, error) {
 // user-level defaults. Explicit paths should use Load so home defaults are
 // skipped, matching the sbx env command contract.
 func LoadDefault(homeDir, workingDir string) (Plan, error) {
+	return LoadDefaultWithArguments(homeDir, workingDir, ArgumentOverrides{})
+}
+
+// LoadDefaultWithArguments resolves user defaults and the current-directory
+// file, then validates transient argument values.
+func LoadDefaultWithArguments(homeDir, workingDir string, overrides ArgumentOverrides) (Plan, error) {
 	if strings.TrimSpace(homeDir) == "" || strings.TrimSpace(workingDir) == "" {
 		return Plan{}, errors.New("resolve default environment paths")
 	}
@@ -182,7 +218,7 @@ func LoadDefault(homeDir, workingDir string) (Plan, error) {
 	if err != nil {
 		return Plan{}, errors.New("resolve default environment paths")
 	}
-	return load(paths, filepath.Clean(projectDir))
+	return load(paths, filepath.Clean(projectDir), overrides)
 }
 
 func mergeDocument(plan Plan, doc document, filePath, projectDir string) (Plan, error) {
@@ -205,6 +241,12 @@ func mergeDocument(plan Plan, doc document, filePath, projectDir string) (Plan, 
 			return Plan{}, err
 		}
 		plan.AdditionalWorkspaces = append(plan.AdditionalWorkspaces, Workspace{Path: resolved, ReadOnly: mount.ReadOnly})
+	}
+	if len(doc.Args) > 0 && plan.arguments == nil {
+		plan.arguments = make(map[string]argumentDeclaration, len(doc.Args))
+	}
+	for name, declaration := range doc.Args {
+		plan.arguments[name] = declaration
 	}
 	for _, port := range doc.Ports {
 		var host *uint16
@@ -256,7 +298,135 @@ func (d document) validate() error {
 	if err := validatePorts(d.Ports); err != nil {
 		return err
 	}
+	if err := validateArgumentDefinitions(d.Args); err != nil {
+		return err
+	}
 	return validateOptions(d.SandboxOptions)
+}
+
+func validateArgumentDefinitions(arguments map[string]argumentDeclaration) error {
+	for name, declaration := range arguments {
+		if !argumentIdentifier.MatchString(name) {
+			return errors.New("environment argument name is invalid")
+		}
+		hasDefault := declaration.Default != nil
+		required := declaration.Required != nil && *declaration.Required
+		if hasDefault == required || declaration.Required != nil && !*declaration.Required && !hasDefault {
+			return errors.New("environment argument must set exactly one of default or required: true")
+		}
+		if declaration.Enum != nil && declaration.Pattern != nil {
+			return errors.New("environment argument cannot set both enum and pattern")
+		}
+		if declaration.Pattern != nil {
+			if _, err := regexp.Compile(*declaration.Pattern); err != nil {
+				return errors.New("environment argument pattern is invalid")
+			}
+		}
+	}
+	return nil
+}
+
+func applyArgumentOverrides(plan *Plan, overrides ArgumentOverrides) error {
+	provided := make(map[string]string)
+	for _, path := range overrides.Files {
+		values, err := readArgumentFile(path)
+		if err != nil {
+			return err
+		}
+		for name, value := range values {
+			provided[name] = value
+		}
+	}
+	cliValues := make(map[string]string)
+	if err := parseArgumentValues(overrides.Values, cliValues); err != nil {
+		return err
+	}
+	for name, value := range cliValues {
+		provided[name] = value
+	}
+	for name := range provided {
+		if _, ok := plan.arguments[name]; !ok {
+			return errors.New("value supplied for an undeclared environment argument")
+		}
+	}
+	for name, declaration := range plan.arguments {
+		value, hasValue := provided[name]
+		if !hasValue && declaration.Default != nil {
+			value = *declaration.Default
+			hasValue = true
+		}
+		if !hasValue {
+			return errors.New("required environment argument is missing")
+		}
+		if err := validateArgumentValue(value, declaration); err != nil {
+			return err
+		}
+		plan.ArgumentNames = append(plan.ArgumentNames, name)
+	}
+	return nil
+}
+
+func validateArgumentValue(value string, declaration argumentDeclaration) error {
+	if declaration.Enum != nil {
+		for _, candidate := range declaration.Enum {
+			if value == candidate {
+				return nil
+			}
+		}
+		return errors.New("environment argument is not one of its allowed enum values")
+	}
+	if declaration.Pattern != nil {
+		compiled, err := regexp.Compile(*declaration.Pattern)
+		if err != nil {
+			return errors.New("environment argument pattern is invalid")
+		}
+		match := compiled.FindStringIndex(value)
+		if len(match) != 2 || match[0] != 0 || match[1] != len(value) {
+			return errors.New("environment argument does not match its required pattern")
+		}
+	}
+	return nil
+}
+
+func parseArgumentValues(values []string, destination map[string]string) error {
+	for _, item := range values {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok || !argumentIdentifier.MatchString(name) {
+			return errors.New("environment argument must use name=value syntax")
+		}
+		destination[name] = value
+	}
+	return nil
+}
+
+func readArgumentFile(path string) (map[string]string, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("environment argument file path is required")
+	}
+	file, err := os.Open(path) // #nosec G304 -- path is an explicit user-selected argument file
+	if err != nil {
+		return nil, errors.New("open environment argument file")
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("environment argument file must be a regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
+	if err != nil || len(data) > maxFileSize {
+		return nil, errors.New("read environment argument file")
+	}
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if line == "" {
+			continue
+		}
+		if err := parseArgumentValues([]string{line}, values); err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
 }
 
 func validatePorts(ports []portMapping) error {
