@@ -426,17 +426,17 @@ func TestRootHelpListsSupportedAndUnsupportedDockerCommandFamilies(t *testing.T)
 	if code := runner.Run(context.Background(), []string{"--help"}); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
-	for _, expected := range []string{"Sandbox commands:", "Management commands:", "Extensions:", "reset", "template", "Unsupported Docker Sandboxes commands:", "agents", "volume", "--socket PATH"} {
+	for _, expected := range []string{"Sandbox commands:", "Management commands:", "agents, daemon", "Extensions:", "reset", "template", "Unsupported Docker Sandboxes commands:", "env, mcp", "volume", "--socket PATH"} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("root help lacks %q: %s", expected, out.String())
 		}
 	}
 }
 
-func TestAgentManagementCommandFailsExplicitly(t *testing.T) {
+func TestAgentManagementCommandListsBuiltins(t *testing.T) {
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out}
-	if code := runner.Run(context.Background(), []string{"agents"}); code != 1 || !strings.Contains(out.String(), "agents: unsupported") {
+	if code := runner.Run(context.Background(), []string{"agents", "ls", "--format", "json"}); code != 0 || !strings.Contains(out.String(), `"name": "claude"`) {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
 }

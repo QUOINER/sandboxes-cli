@@ -15,19 +15,19 @@ import (
 )
 
 var serviceEnvVars = map[string][]string{
-	"anthropic":   {"ANTHROPIC_API_KEY"},
-	"copilot":     {"COPILOT_API_KEY"},
-	"cursor":      {"CURSOR_API_KEY"},
-	"devin":       {"DEVIN_API_KEY"},
-	"droid":       {"DROID_API_KEY"},
-	"github":      {"GH_TOKEN", "GITHUB_TOKEN"},
-	"google":      {"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-	"groq":        {"GROQ_API_KEY"},
-	"mistral":     {"MISTRAL_API_KEY"},
-	"nebius":      {"NEBIUS_API_KEY"},
-	openAIService: {openAIAPIKeyEnv},
-	"openrouter":  {"OPENROUTER_API_KEY"},
-	"xai":         {"XAI_API_KEY"},
+	anthropicServiceName: {anthropicAPIKeyEnv},
+	copilotAgentName:     {copilotAPIKeyEnv},
+	cursorService:        {cursorAPIKeyEnv},
+	"devin":              {"DEVIN_API_KEY"},
+	droidService:         {factoryAPIKeyEnv, droidAPIKeyEnv},
+	githubService:        {ghTokenEnv, githubTokenEnv},
+	googleService:        {"GOOGLE_API_KEY", geminiAPIKeyEnv},
+	groqService:          {"GROQ_API_KEY"},
+	mistralService:       {"MISTRAL_API_KEY"},
+	"nebius":             {"NEBIUS_API_KEY"},
+	openAIService:        {openAIAPIKeyEnv},
+	openrouterService:    {"OPENROUTER_API_KEY"},
+	xaiService:           {"XAI_API_KEY"},
 }
 
 func (r *Runner) secretImportHelp() int {

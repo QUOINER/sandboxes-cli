@@ -157,7 +157,7 @@ func TestRunCreatesStartsAndAttachesShell(t *testing.T) {
 	if sandboxes.created.Name != "dev" || sandboxes.created.Workspace != workspace {
 		t.Fatalf("unexpected create request: %#v", sandboxes.created)
 	}
-	if !sessions.opened || strings.Join(sessions.req.Argv, "\x00") != "/bin/sh" || sessions.req.TTY {
+	if !sessions.opened || strings.Join(sessions.req.Argv, "\x00") != "bash\x00-l" || sessions.req.TTY {
 		t.Fatalf("unexpected session: %#v", sessions.req)
 	}
 	if sessions.req.SandboxID != "sb-run" || !sessions.closed {
@@ -229,6 +229,136 @@ func TestRunCodexPrefersStoredAPIKey(t *testing.T) {
 	}
 }
 
+func TestRunClaudeUsesHostAnthropicSecretProxy(t *testing.T) {
+	sandboxes := &runSandbox{}
+	sessions := &fakeSessions{}
+	runner, out, stderr := runTestRunner(t, runClient{
+		fakeClient: fakeClient{secrets: runSecretService{{Service: "anthropic", Scope: sdk.SecretScopeGlobal}}},
+		sandboxes:  sandboxes,
+		sessions:   sessions,
+	}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "claude-proxy-test", "--detach", "claude"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if got := sandboxes.created.Env["ANTHROPIC_API_KEY"]; got != "${proxy:anthropic}" {
+		t.Fatalf("Claude create env=%q, want host-managed proxy reference", got)
+	}
+}
+
+func TestRunGeminiUsesHostGoogleSecretProxy(t *testing.T) {
+	sandboxes := &runSandbox{}
+	runner, out, stderr := runTestRunner(t, runClient{
+		fakeClient: fakeClient{secrets: runSecretService{{Service: googleService, Scope: sdk.SecretScopeGlobal}}},
+		sandboxes:  sandboxes,
+		sessions:   &fakeSessions{},
+	}, "")
+	if code := runner.Run(context.Background(), []string{"run", "--name", "gemini-proxy-test", "--detach", "gemini"}); code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	if got := sandboxes.created.Env[geminiAPIKeyEnv]; got != "${proxy:google}" {
+		t.Fatalf("Gemini create env=%q, want host-managed proxy reference", got)
+	}
+}
+
+func TestAgentSpecificProviderSecretsActivateOnlyFixedProxyRoutes(t *testing.T) {
+	cases := []struct {
+		name    string
+		service string
+		want    map[string]string
+	}{
+		{
+			name: "copilot", service: githubService,
+			want: map[string]string{
+				"GH_TOKEN":                       "${proxy:github}",
+				"RHEIC_PROXY_GITHUB_WEB":         "${proxy:github-web}",
+				"RHEIC_PROXY_GITHUB_RAW":         "${proxy:github-raw}",
+				"RHEIC_PROXY_GITHUB_GIST":        "${proxy:github-gist}",
+				"RHEIC_PROXY_GITHUB_COPILOT":     "${proxy:github-copilot}",
+				"RHEIC_PROXY_GITHUB_COPILOT_API": "${proxy:github-copilot-api}",
+			},
+		},
+		{
+			name: "cursor", service: cursorService,
+			want: map[string]string{
+				"CURSOR_API_KEY":            "${proxy:cursor}",
+				"RHEIC_PROXY_CURSOR_API3":   "${proxy:cursor-api3}",
+				"RHEIC_PROXY_CURSOR_REPO42": "${proxy:cursor-repo42}",
+				"RHEIC_PROXY_CURSOR_WEB":    "${proxy:cursor-web}",
+			},
+		},
+		{
+			name: "droid", service: droidService,
+			want: map[string]string{
+				"FACTORY_API_KEY":         "${proxy:droid}",
+				"RHEIC_PROXY_DROID_APP":   "${proxy:droid-app}",
+				"RHEIC_PROXY_DROID_RELAY": "${proxy:droid-relay}",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sandboxes := &runSandbox{}
+			runner, out, stderr := runTestRunner(t, runClient{
+				fakeClient: fakeClient{secrets: runSecretService{{Service: tc.service, Scope: sdk.SecretScopeGlobal}}},
+				sandboxes:  sandboxes,
+				sessions:   &fakeSessions{},
+			}, "")
+			if code := runner.Run(context.Background(), []string{"run", "--name", "proxy-agent-test", "--detach", tc.name}); code != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+			if !reflect.DeepEqual(sandboxes.created.Env, tc.want) {
+				t.Fatalf("create env=%v, want fixed proxy references %v", sandboxes.created.Env, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunClaudeDoesNotReplaceExplicitCredentialConfiguration(t *testing.T) {
+	client := runClient{fakeClient: fakeClient{secrets: runSecretService{{Service: "anthropic", Scope: sdk.SecretScopeGlobal}}}, sandboxes: &runSandbox{}, sessions: &fakeSessions{}}
+	for _, entry := range []string{"ANTHROPIC_API_KEY=proxy-managed", "ANTHROPIC_BASE_URL=http://localhost:1234"} {
+		t.Run(strings.ReplaceAll(entry, "=", "_"), func(t *testing.T) {
+			got, err := prepareAgentCredentials(context.Background(), client, "claude", "", []string{entry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, []string{entry}) {
+				t.Fatalf("env=%q, want explicit override preserved", got)
+			}
+		})
+	}
+}
+
+func TestMultiProviderAgentsOnlyReceiveScopedProxyReferences(t *testing.T) {
+	secrets := runSecretService{
+		{Service: "openai", Scope: sdk.SecretScopeGlobal},
+		{Service: "anthropic", Scope: sdk.SecretScopeSandbox, SandboxName: "agent-test"},
+		{Service: googleService, Scope: sdk.SecretScopeGlobal},
+		{Service: "groq", Scope: sdk.SecretScopeSandbox, SandboxName: "another-sandbox"},
+	}
+	for _, agent := range []string{"opencode", "docker-agent"} {
+		t.Run(agent, func(t *testing.T) {
+			sandboxes := &runSandbox{}
+			runner, out, stderr := runTestRunner(t, runClient{
+				fakeClient: fakeClient{secrets: secrets},
+				sandboxes:  sandboxes,
+				sessions:   &fakeSessions{},
+			}, "")
+			if code := runner.Run(context.Background(), []string{"run", "--name", "agent-test", "--detach", "--env", "MISTRAL_API_KEY=explicit-placeholder", agent}); code != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
+			}
+			want := map[string]string{
+				"MISTRAL_API_KEY":   "explicit-placeholder",
+				"ANTHROPIC_API_KEY": "${proxy:anthropic}",
+				geminiAPIKeyEnv:     "${proxy:google}",
+				"OPENAI_API_KEY":    "${proxy:openai}",
+			}
+			if !reflect.DeepEqual(sandboxes.created.Env, want) {
+				t.Fatalf("create env=%v, want only applicable proxy references %v", sandboxes.created.Env, want)
+			}
+		})
+	}
+}
+
 func TestValidateOAuthProxyEnvironmentRejectsOverrides(t *testing.T) {
 	if err := validateOAuthProxyEnvironment([]string{openAIOAuthEnvRef, "PATH=/bin"}); err != nil {
 		t.Fatalf("valid OAuth proxy environment rejected: %v", err)
@@ -281,7 +411,7 @@ func TestRunReusesAndRestartsExistingSandbox(t *testing.T) {
 	if sandboxes.createCalls != 0 || sandboxes.startCalls != 1 {
 		t.Fatalf("create=%d start=%d", sandboxes.createCalls, sandboxes.startCalls)
 	}
-	if !sessions.opened || sessions.req.SandboxID != "sb-old" || strings.Join(sessions.req.Argv, "\x00") != "/bin/sh" {
+	if !sessions.opened || sessions.req.SandboxID != "sb-old" || strings.Join(sessions.req.Argv, "\x00") != "bash\x00-l" {
 		t.Fatalf("unexpected session: %#v", sessions.req)
 	}
 }
@@ -327,7 +457,11 @@ func TestRunHelpExitsZero(t *testing.T) {
 	if !strings.Contains(help, "usage: rsbx run") || !strings.Contains(help, "shell") {
 		t.Fatalf("unexpected help: %q", out.String())
 	}
-	for _, expected := range []string{"[PATH...]", "--kit FILE", "--deny-write PATH", "HOST_IP:]HOST_PORT", "tcp6|udp6"} {
+	for _, expected := range []string{
+		"[PATH...]", "--kit FILE", "--deny-write PATH", "HOST_IP:]HOST_PORT", "tcp6|udp6",
+		"cloud sandboxes and remote/OCI kits are not supported", "it reuses automatically",
+		"Agent arguments after -- are passed to the agent", "rsbx run --new --name clean-shell --detach shell",
+	} {
 		if !strings.Contains(help, expected) {
 			t.Errorf("run help omitted %q: %q", expected, help)
 		}

@@ -20,13 +20,17 @@ import (
 )
 
 const (
-	openAIService = "openai"
-	oauthFlag     = "--oauth"
+	openAIService     = "openai"
+	groqService       = "groq"
+	mistralService    = "mistral"
+	openrouterService = "openrouter"
+	xaiService        = "xai"
+	oauthFlag         = "--oauth"
 )
 
 var serviceSecretNames = []string{
-	"anthropic", "copilot", "cursor", "devin", "droid", "github", "google",
-	"groq", "mistral", "nebius", openAIService, "openrouter", "xai",
+	anthropicServiceName, copilotAgentName, cursorService, "devin", droidService, githubService, googleService,
+	groqService, mistralService, "nebius", openAIService, openrouterService, xaiService,
 }
 
 type serviceSecretOutput struct {

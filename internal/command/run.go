@@ -21,21 +21,24 @@ import (
 const (
 	runUsage = `usage: rsbx run [flags] [AGENT] [PATH...] [-- AGENT_ARGS...]
 
-Create a sandbox (or reuse one by --name), start it, and attach to an agent.
+Create a local sandbox, start it, and attach to an agent. This command uses the
+local Rheic daemon; cloud sandboxes and remote/OCI kits are not supported here.
 The default workspace is the current directory. Pass additional workspace paths
-after PATH; append :ro to make a workspace read-only. With --detach the sandbox
-is created and started, and its ID is printed without attaching.
+after PATH; append :ro to make a workspace read-only. A single-file read-only
+workspace is supported. Agent arguments after -- are passed to the agent.
 
-When no --name is given, the sandbox is named <agent>-<workspace-basename>.
-If that sandbox already exists it is reused: the CLI prompts on a terminal
-and reuses without prompting when stdin is not a terminal; --new always
-creates a fresh sandbox instead.
+Without --name, the sandbox name is <agent>-<workspace-basename>. An existing
+sandbox with that name is reused: on a terminal, rsbx asks first; without a
+terminal, it reuses automatically. --new always creates a fresh sandbox.
+With --name, rsbx reuses and restarts that sandbox unless --new is also set.
+With --detach, rsbx creates or starts the sandbox, prints its ID, and exits.
+--rm removes the sandbox after the attached agent session exits.
 
 Agents:
-  shell, kimi              available
-  codex, gemini, opencode  preview (official image, not live-tested)
-  claude, cline, copilot, cursor, devin, docker-agent, droid, kiro
-                           unsupported
+  kimi                      available (Rheic extension)
+  claude, copilot, cursor, devin, docker-agent, droid, gemini, kiro, opencode
+  codex, shell              preview (launchable; auth and live VM behavior not fully validated)
+  dsh                       preview extension
 
 Flags:
       --name NAME   sandbox name; reuse and restart it when it already exists
@@ -57,6 +60,13 @@ Flags:
       --env-file FILE             read environment overrides from a file (repeatable)
       --rm                        remove the sandbox after the agent session exits
   -h, --help                      help for run
+
+Examples:
+  rsbx run shell
+  rsbx run codex ./project /path/to/docs:ro
+  rsbx run shell -- --version
+  rsbx run --name dev-shell --detach shell
+  rsbx run --new --name clean-shell --detach shell
 `
 
 	shellAgent        = "shell"
@@ -190,7 +200,7 @@ func (r *Runner) run(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
-	resources.env, err = prepareCodexCredentials(ctx, client, agent, opts.name, resources.env)
+	resources.env, err = prepareAgentCredentials(ctx, client, agent, opts.name, resources.env)
 	if err != nil {
 		r.error(err)
 		return 1
@@ -244,28 +254,157 @@ func ensureOpenAIOAuthLogin(ctx context.Context, client sdk.Client, env []string
 	return nil
 }
 
-func prepareCodexCredentials(ctx context.Context, client sdk.Client, agent, sandboxName string, env []string) ([]string, error) {
+func prepareAgentCredentials(ctx context.Context, client sdk.Client, agent, sandboxName string, env []string) ([]string, error) {
 	if usesOpenAIOAuthReference(env) {
 		if err := ensureOpenAIOAuthLogin(ctx, client, env); err != nil {
 			return nil, err
 		}
 		return env, nil
 	}
-	if agent != "codex" {
+	if agent == "opencode" || agent == "docker-agent" {
+		return prepareMultiProviderCredentials(ctx, client, sandboxName, env)
+	}
+	if profile, ok := agentHostProxyProfile(agent); ok {
+		return prepareFixedAgentCredentials(ctx, client, sandboxName, env, profile)
+	}
+	service, variable := agentCredentialContract(agent)
+	if service == "" || hasEnvironmentKey(env, variable) || hasEnvironmentKey(env, agentCredentialBaseURL(agent)) {
 		return env, nil
 	}
-	if hasEnvironmentKey(env, "OPENAI_API_KEY") || hasEnvironmentKey(env, "OPENAI_BASE_URL") {
-		return env, nil
-	}
-	secrets, err := sdk.Secrets(client).List(ctx)
+	found, err := hasStoredAgentCredential(ctx, client, service, sandboxName)
 	if err != nil {
-		return nil, fmt.Errorf("check stored OpenAI API credentials: %w", err)
+		return nil, err
 	}
-	for _, secret := range secrets {
-		if secret.Service == "openai" && (secret.Scope == sdk.SecretScopeGlobal || secret.SandboxName == sandboxName && sandboxName != "") {
-			return append(env, "OPENAI_API_KEY=${proxy:openai}"), nil
+	if found {
+		return append(env, variable+"=${proxy:"+service+"}"), nil
+	}
+	if agent != codexAgentName {
+		return env, nil
+	}
+	return prepareCodexOAuth(ctx, client, env)
+}
+
+type proxyRouteMarker struct {
+	environment string
+	service     string
+}
+
+type agentProxyProfile struct {
+	service       string
+	credentialEnv string
+	conflicts     []string
+	additional    []proxyRouteMarker
+}
+
+func agentHostProxyProfile(agent string) (agentProxyProfile, bool) {
+	switch agent {
+	case copilotAgentName:
+		return agentProxyProfile{
+			service: githubService, credentialEnv: ghTokenEnv, conflicts: []string{ghTokenEnv, githubTokenEnv},
+			additional: []proxyRouteMarker{
+				{environment: "RHEIC_PROXY_GITHUB_WEB", service: "github-web"},
+				{environment: "RHEIC_PROXY_GITHUB_RAW", service: "github-raw"},
+				{environment: "RHEIC_PROXY_GITHUB_GIST", service: "github-gist"},
+				{environment: "RHEIC_PROXY_GITHUB_COPILOT", service: "github-copilot"},
+				{environment: "RHEIC_PROXY_GITHUB_COPILOT_API", service: "github-copilot-api"},
+			},
+		}, true
+	case "cursor":
+		return agentProxyProfile{
+			service: cursorService, credentialEnv: cursorAPIKeyEnv, conflicts: []string{cursorAPIKeyEnv},
+			additional: []proxyRouteMarker{
+				{environment: "RHEIC_PROXY_CURSOR_API3", service: "cursor-api3"},
+				{environment: "RHEIC_PROXY_CURSOR_REPO42", service: "cursor-repo42"},
+				{environment: "RHEIC_PROXY_CURSOR_WEB", service: "cursor-web"},
+			},
+		}, true
+	case "droid":
+		return agentProxyProfile{
+			service: droidService, credentialEnv: factoryAPIKeyEnv, conflicts: []string{factoryAPIKeyEnv, droidAPIKeyEnv},
+			additional: []proxyRouteMarker{
+				{environment: "RHEIC_PROXY_DROID_APP", service: "droid-app"},
+				{environment: "RHEIC_PROXY_DROID_RELAY", service: "droid-relay"},
+			},
+		}, true
+	default:
+		return agentProxyProfile{}, false
+	}
+}
+
+func prepareFixedAgentCredentials(ctx context.Context, client sdk.Client, sandboxName string, env []string, profile agentProxyProfile) ([]string, error) {
+	for _, key := range profile.conflicts {
+		if hasEnvironmentKey(env, key) {
+			return env, nil
 		}
 	}
+	found, err := hasStoredAgentCredential(ctx, client, profile.service, sandboxName)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return env, nil
+	}
+	env = append(env, profile.credentialEnv+"=${proxy:"+profile.service+"}")
+	for _, marker := range profile.additional {
+		env = append(env, marker.environment+"=${proxy:"+marker.service+"}")
+	}
+	return env, nil
+}
+
+type agentProviderCredential struct {
+	service  string
+	variable string
+	baseURL  string
+}
+
+var multiProviderCredentials = []agentProviderCredential{
+	{service: anthropicServiceName, variable: anthropicAPIKeyEnv, baseURL: anthropicBaseURLEnv},
+	{service: googleService, variable: geminiAPIKeyEnv, baseURL: googleGeminiBaseURL},
+	{service: openAIService, variable: openAIAPIKeyEnv, baseURL: openAIBaseURLEnv},
+	{service: groqService, variable: "GROQ_API_KEY", baseURL: "GROQ_BASE_URL"},
+	{service: mistralService, variable: "MISTRAL_API_KEY", baseURL: "MISTRAL_BASE_URL"},
+	{service: openrouterService, variable: "OPENROUTER_API_KEY", baseURL: "OPENROUTER_BASE_URL"},
+	{service: xaiService, variable: "XAI_API_KEY", baseURL: "XAI_BASE_URL"},
+}
+
+func prepareMultiProviderCredentials(ctx context.Context, client sdk.Client, sandboxName string, env []string) ([]string, error) {
+	secrets, err := sdk.Secrets(client).List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check stored multi-provider credentials: %w", err)
+	}
+	for _, provider := range multiProviderCredentials {
+		if hasEnvironmentKey(env, provider.variable) || hasEnvironmentKey(env, provider.baseURL) {
+			continue
+		}
+		for _, secret := range secrets {
+			if secret.Service == provider.service && serviceSecretMatchesSandbox(secret, sandboxName) {
+				env = append(env, provider.variable+"=${proxy:"+provider.service+"}")
+				break
+			}
+		}
+	}
+	return env, nil
+}
+
+func serviceSecretMatchesSandbox(secret sdk.ServiceSecret, sandboxName string) bool {
+	return secret.Scope == sdk.SecretScopeGlobal ||
+		secret.Scope == sdk.SecretScopeSandbox && sandboxName != "" && secret.SandboxName == sandboxName
+}
+
+func hasStoredAgentCredential(ctx context.Context, client sdk.Client, service, sandboxName string) (bool, error) {
+	secrets, err := sdk.Secrets(client).List(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check stored %s credentials: %w", service, err)
+	}
+	for _, secret := range secrets {
+		if secret.Service == service && (secret.Scope == sdk.SecretScopeGlobal || secret.Scope == sdk.SecretScopeSandbox && secret.SandboxName == sandboxName && sandboxName != "") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func prepareCodexOAuth(ctx context.Context, client sdk.Client, env []string) ([]string, error) {
 	present, err := sdk.AccountStatus(client).Status(ctx, "openai")
 	if err != nil {
 		return nil, fmt.Errorf("check OpenAI OAuth credentials: %w", err)
@@ -276,6 +415,32 @@ func prepareCodexCredentials(ctx context.Context, client sdk.Client, agent, sand
 		}
 	}
 	return append(env, openAIOAuthEnvRef), nil
+}
+
+func agentCredentialContract(agent string) (service, variable string) {
+	switch agent {
+	case claudeAgentName:
+		return anthropicServiceName, anthropicAPIKeyEnv
+	case codexAgentName:
+		return openAIService, openAIAPIKeyEnv
+	case "gemini":
+		return googleService, geminiAPIKeyEnv
+	default:
+		return "", ""
+	}
+}
+
+func agentCredentialBaseURL(agent string) string {
+	switch agent {
+	case claudeAgentName:
+		return anthropicBaseURLEnv
+	case codexAgentName:
+		return openAIBaseURLEnv
+	case "gemini":
+		return googleGeminiBaseURL
+	default:
+		return ""
+	}
 }
 
 func hasEnvironmentKey(env []string, target string) bool {
@@ -679,7 +844,14 @@ func isAgentName(value string) bool {
 }
 
 func runArgv(name string, agentArgs []string) []string {
-	return append(agentCommandArgs(name), agentArgs...)
+	defaults := agentCommandArgs(name)
+	if len(agentArgs) == 0 {
+		return defaults
+	}
+	if strings.HasPrefix(agentArgs[0], "-") {
+		return append(defaults, agentArgs...)
+	}
+	return append([]string(nil), agentArgs...)
 }
 
 func runTerminal(input any) (interactive, tty bool) {

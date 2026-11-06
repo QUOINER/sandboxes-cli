@@ -22,12 +22,12 @@ var completionTree = map[string][]string{
 	"rm":              {"-f", forceFlag, "--all", formatFlag, jsonFlag},
 	"prune":           {"--dry-run", "-f", forceFlag, "--filter", formatFlag, jsonFlag},
 	"diagnose":        {jsonFlag, formatFlag},
-	commandAgents:     {},
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {"-f", forceFlag},
 	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", "--command", globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
+	commandAgents:     {formatFlag, jsonFlag},
 	completionCommand: {},
 	"help":            {},
 }
@@ -36,6 +36,7 @@ var completionSubcommands = map[string][]string{
 	policyCommand:     {"ls", commandInspect, actionAllow, actionDeny, "rm", "check", networkKeyword},
 	secretCommand:     {"import", "ls", commandList, commandSet, commandSetCustom, "rm", commandRemove, commandDelete, commandUnset},
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
+	commandAgents:     {"ls", commandList},
 }
 
 func completionCommands() []string {

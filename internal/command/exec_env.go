@@ -10,12 +10,31 @@ import (
 )
 
 const (
-	maxExecEnvEntries = 256
-	maxExecEnvEntry   = 64 * 1024
-	maxExecEnvTotal   = 256 * 1024
-	maxExecEnvFile    = 1024 * 1024
-	openAIAPIKeyEnv   = "OPENAI_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
-	openAIOAuthEnvRef = openAIAPIKeyEnv + "=${oauth:openai}"
+	maxExecEnvEntries    = 256
+	maxExecEnvEntry      = 64 * 1024
+	maxExecEnvTotal      = 256 * 1024
+	maxExecEnvFile       = 1024 * 1024
+	openAIAPIKeyEnv      = "OPENAI_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
+	openAIBaseURLEnv     = "OPENAI_BASE_URL"
+	openAIOAuthEnvRef    = openAIAPIKeyEnv + "=${oauth:openai}"
+	claudeAgentName      = "claude"
+	codexAgentName       = "codex"
+	anthropicServiceName = "anthropic"
+	anthropicAPIKeyEnv   = "ANTHROPIC_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
+	anthropicBaseURLEnv  = "ANTHROPIC_BASE_URL"
+	googleService        = "google"
+	geminiAPIKeyEnv      = "GEMINI_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
+	googleGeminiBaseURL  = "GOOGLE_GEMINI_BASE_URL"
+	githubService        = "github"
+	cursorService        = "cursor"
+	droidService         = "droid"
+	copilotAgentName     = "copilot"
+	ghTokenEnv           = "GH_TOKEN"
+	githubTokenEnv       = "GITHUB_TOKEN"    //nolint:gosec // G101: this is an environment variable name, not a credential.
+	copilotAPIKeyEnv     = "COPILOT_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
+	cursorAPIKeyEnv      = "CURSOR_API_KEY"  //nolint:gosec // G101: this is an environment variable name, not a credential.
+	factoryAPIKeyEnv     = "FACTORY_API_KEY" //nolint:gosec // G101: this is an environment variable name, not a credential.
+	droidAPIKeyEnv       = "DROID_API_KEY"   //nolint:gosec // G101: this is an environment variable name, not a credential.
 )
 
 func validateOAuthProxyEnvironment(env []string) error {
@@ -33,7 +52,7 @@ func validateOAuthProxyEnvironment(env []string) error {
 		if key == openAIAPIKeyEnv {
 			openAIKeyCount++
 		}
-		if key == "OPENAI_BASE_URL" {
+		if key == openAIBaseURLEnv {
 			baseURLCount++
 		}
 	}

@@ -80,13 +80,18 @@ hold a protected child. `--detach` creates and starts without attaching
 and prints the sandbox ID. `--cpus`/`--memory` apply only when creating;
 reusing an existing sandbox warns and keeps its resources. `-e/--env` and
 `--env-file` add session env overrides. `--rm` removes the sandbox after the
-session (rejected with `--detach`). Only the `shell` agent is implemented;
-`kimi` and `codex` use public pinned GHCR images (see `agents/kimi/` and the
-embedded registry). `gemini` and `opencode` are preview entries using their
-official image names; `dsh` serves the pinned DeepSeek Harness web UI on guest
-port 8080 and publishes it on a loopback port by default. `claude`, `cline` and
-the remaining agents are explicitly unsupported until an image/auth contract
-exists. The embedded registry is `internal/agent/registry.yaml`. Multiple workspaces are supported; a
+session (rejected with `--detach`). `kimi` retains its existing Rheic extension
+path. The Docker v0.50.1 built-in set is exposed through
+`rsbx agents list`: `claude`, `codex`, `copilot`, `cursor`, `devin`,
+`docker-agent`, `droid`, `gemini`, `kiro`, `opencode`, and `shell`. The nine
+entries use Docker's published multi-platform images pinned by manifest digest
+and select the dedicated guest Docker profile. Their status remains preview
+until per-agent authentication and VM lifecycle acceptance passes. `rsbx run`
+accepts preview agents and preserves Docker's argument rule:
+agent flags after `--` extend the default command, while a bare subcommand or
+prompt replaces it. `dsh` remains a Rheic preview extension; `cline` is
+unsupported. The embedded registry is `internal/agent/registry.yaml`. Multiple
+workspaces are supported; a
 `:ro` suffix mounts a directory read-only. `--publish [[HOST_IP:]HOST_PORT:]GUEST[/tcp|udp|tcp4|udp4|tcp6|udp6]`
 may be repeated when creating, with loopback `HOST_IP` limited to `127.0.0.1` and
 `::1` (IPv6 uses brackets, e.g. `[::1]:8080:80/tcp6`); `rsbx ports SANDBOX`
