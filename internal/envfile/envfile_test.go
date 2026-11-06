@@ -1,6 +1,7 @@
 package envfile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -190,8 +191,10 @@ func TestLoadValidatesDeclaredArgumentsWithoutRetainingValues(t *testing.T) {
 	if !reflect.DeepEqual(plan.ArgumentNames, []string{"build", "channel"}) {
 		t.Fatalf("argument names = %#v", plan.ArgumentNames)
 	}
-	if plan.arguments != nil {
-		t.Fatal("argument declarations/default values were retained in returned plan")
+	for _, value := range []string{"stable", "preview", "BUILD42", "CLI77"} {
+		if strings.Contains(fmt.Sprintf("%#v", plan), value) {
+			t.Fatalf("argument value %q was retained in the plan", value)
+		}
 	}
 }
 
@@ -233,9 +236,6 @@ func TestLoadInterpolatesArgumentReferencesWithoutRetainingValues(t *testing.T) 
 	}
 	if plan.CPUs == nil || *plan.CPUs != 4 {
 		t.Fatalf("substituted CPU value = %#v, want 4", plan.CPUs)
-	}
-	if plan.arguments != nil {
-		t.Fatal("argument declarations/default values were retained in returned plan")
 	}
 	if !reflect.DeepEqual(plan.EnvironmentKeys, []string{"API_URL", "DEPLOYMENT"}) {
 		t.Fatalf("environment keys = %#v", plan.EnvironmentKeys)

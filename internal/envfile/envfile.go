@@ -3,6 +3,7 @@
 package envfile
 
 import (
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 const (
 	maxFileSize   = 1 << 20
+	maxInputSize  = 32 << 20
 	maxYAMLNodes  = 20_000
 	maxYAMLDepth  = 64
 	yamlStringTag = "!!str"
@@ -56,7 +58,6 @@ type Plan struct {
 	EnvironmentKeys      []string
 	CPUs                 *uint32
 	Memory               string
-	arguments            map[string]argumentDeclaration
 }
 
 // ArgumentOverrides contains values read from argument files followed by
@@ -171,12 +172,24 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 	if err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{arguments: arguments}
+	defer clear(argumentValues)
+	clear(arguments)
+	var plan Plan
 	for _, source := range documents {
-		if err := interpolateArgumentReferences(source.node, argumentValues); err != nil {
+		root, _, digest, err := readDocumentNode(source.path)
+		if err != nil {
 			return Plan{}, err
 		}
-		doc, err := decodeDocumentNode(source.node)
+		if digest != source.digest {
+			return Plan{}, errors.New("environment file changed during preview; retry")
+		}
+		if err := stripArgumentDefinitions(root); err != nil {
+			return Plan{}, err
+		}
+		if err := interpolateArgumentReferences(root, argumentValues); err != nil {
+			return Plan{}, err
+		}
+		doc, err := decodeDocumentNode(root)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -192,38 +205,28 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 		return Plan{}, errors.New("environment requires an agent")
 	}
 	plan.ArgumentNames = names
-	plan.arguments = nil
 	sort.Strings(plan.EnvironmentKeys)
 	sort.Strings(plan.ArgumentNames)
 	return plan, nil
 }
 
 type sourceDocument struct {
-	path string
-	node *yaml.Node
+	path   string
+	digest [32]byte
 }
 
 func readSourceDocuments(paths []string) ([]sourceDocument, map[string]argumentDeclaration, error) {
 	documents := make([]sourceDocument, 0, len(paths))
 	var arguments map[string]argumentDeclaration
+	inputSize := 0
 	for _, path := range paths {
-		filePath, err := resolveFile(path)
+		source, declarations, size, err := readSourceDocument(path)
 		if err != nil {
 			return nil, nil, err
 		}
-		root, err := readDocumentNode(filePath)
-		if err != nil {
-			return nil, nil, err
-		}
-		declarations, err := decodeArgumentDefinitions(root)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := validateArgumentDefinitions(declarations); err != nil {
-			return nil, nil, err
-		}
-		if err := rejectArgumentReferencesInDefinitions(root); err != nil {
-			return nil, nil, err
+		inputSize += size
+		if inputSize > maxInputSize {
+			return nil, nil, errors.New("combined environment files exceed size limit")
 		}
 		if len(declarations) > 0 && arguments == nil {
 			arguments = make(map[string]argumentDeclaration)
@@ -231,9 +234,34 @@ func readSourceDocuments(paths []string) ([]sourceDocument, map[string]argumentD
 		for name, declaration := range declarations {
 			arguments[name] = declaration
 		}
-		documents = append(documents, sourceDocument{path: filePath, node: root})
+		documents = append(documents, source)
+		if len(arguments) > maxYAMLNodes {
+			return nil, nil, errors.New("environment has too many argument declarations")
+		}
 	}
 	return documents, arguments, nil
+}
+
+func readSourceDocument(path string) (sourceDocument, map[string]argumentDeclaration, int, error) {
+	filePath, err := resolveFile(path)
+	if err != nil {
+		return sourceDocument{}, nil, 0, err
+	}
+	root, size, digest, err := readDocumentNode(filePath)
+	if err != nil {
+		return sourceDocument{}, nil, 0, err
+	}
+	declarations, err := decodeArgumentDefinitions(root)
+	if err != nil {
+		return sourceDocument{}, nil, 0, err
+	}
+	if err := validateArgumentDefinitions(declarations); err != nil {
+		return sourceDocument{}, nil, 0, err
+	}
+	if err := rejectArgumentReferencesInDefinitions(root); err != nil {
+		return sourceDocument{}, nil, 0, err
+	}
+	return sourceDocument{path: filePath, digest: digest}, declarations, size, nil
 }
 
 // LoadDefault resolves the current-directory environment with optional
@@ -287,12 +315,6 @@ func mergeDocument(plan Plan, doc document, filePath, projectDir string) (Plan, 
 			return Plan{}, err
 		}
 		plan.AdditionalWorkspaces = append(plan.AdditionalWorkspaces, Workspace{Path: resolved, ReadOnly: mount.ReadOnly})
-	}
-	if len(doc.Args) > 0 && plan.arguments == nil {
-		plan.arguments = make(map[string]argumentDeclaration, len(doc.Args))
-	}
-	for name, declaration := range doc.Args {
-		plan.arguments[name] = declaration
 	}
 	for _, port := range doc.Ports {
 		var host *uint16
@@ -384,6 +406,7 @@ func validateArgumentDefinition(name string, declaration argumentDeclaration) er
 
 func resolveArgumentValues(arguments map[string]argumentDeclaration, overrides ArgumentOverrides) ([]string, map[string]string, error) {
 	provided := make(map[string]string)
+	defer clear(provided)
 	for _, path := range overrides.Files {
 		values, err := readArgumentFile(path)
 		if err != nil {
@@ -394,6 +417,7 @@ func resolveArgumentValues(arguments map[string]argumentDeclaration, overrides A
 		}
 	}
 	cliValues := make(map[string]string)
+	defer clear(cliValues)
 	if err := parseArgumentValues(overrides.Values, cliValues); err != nil {
 		return nil, nil, err
 	}
@@ -430,18 +454,41 @@ func decodeArgumentDefinitions(root *yaml.Node) (map[string]argumentDeclaration,
 	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
 		return nil, errors.New("environment file must be a YAML mapping")
 	}
+	var argumentNode *yaml.Node
 	for i := 0; i+1 < len(root.Content[0].Content); i += 2 {
 		key, value := root.Content[0].Content[i], root.Content[0].Content[i+1]
 		if key.Value != argumentKey {
 			continue
 		}
+		if argumentNode != nil {
+			return nil, errors.New("environment file has duplicate arguments fields")
+		}
+		argumentNode = value
+	}
+	if argumentNode != nil {
 		var args map[string]argumentDeclaration
-		if err := value.Decode(&args); err != nil {
+		if err := argumentNode.Decode(&args); err != nil {
 			return nil, errors.New("environment file has invalid argument declarations")
 		}
 		return args, nil
 	}
 	return make(map[string]argumentDeclaration), nil
+}
+
+func stripArgumentDefinitions(root *yaml.Node) error {
+	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
+		return errors.New("environment file must be a YAML mapping")
+	}
+	mapping := root.Content[0]
+	content := make([]*yaml.Node, 0, len(mapping.Content))
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == argumentKey {
+			continue
+		}
+		content = append(content, mapping.Content[i], mapping.Content[i+1])
+	}
+	mapping.Content = content
+	return nil
 }
 
 func rejectArgumentReferencesInDefinitions(root *yaml.Node) error {
@@ -766,17 +813,21 @@ func resolveFile(path string) (string, error) {
 	return absolute, nil
 }
 
-func readDocumentNode(path string) (*yaml.Node, error) {
+func readDocumentNode(path string) (*yaml.Node, int, [32]byte, error) {
 	file, err := os.Open(path) // #nosec G304 -- path is an explicit user-selected environment file
 	if err != nil {
-		return nil, errors.New("open environment file")
+		return nil, 0, [32]byte{}, errors.New("open environment file")
 	}
 	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
 	if err != nil || len(data) > maxFileSize {
-		return nil, errors.New("read environment file")
+		return nil, 0, [32]byte{}, errors.New("read environment file")
 	}
-	return decodeDocumentNodeFromBytes(data)
+	root, err := decodeDocumentNodeFromBytes(data)
+	if err != nil {
+		return nil, 0, [32]byte{}, err
+	}
+	return root, len(data), sha256.Sum256(data), nil
 }
 
 func decodeDocument(data []byte) (document, error) {
