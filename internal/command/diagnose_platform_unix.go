@@ -3,36 +3,9 @@
 package command
 
 import (
-	"fmt"
 	"os/exec"
 	"strings"
-	"syscall"
 )
-
-// checkDiskSpace reports free space on the state directory's volume.
-func checkDiskSpace(stateDir string) diagnoseCheck {
-	check := diagnoseCheck{Name: "Disk space"}
-	if stateDir == "" {
-		check.Status = diagnoseSkip
-		check.Detail = "state directory is unknown"
-		return check
-	}
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(stateDir, &stat); err != nil {
-		check.Status = diagnoseWarn
-		check.Detail = "cannot stat state directory: " + err.Error()
-		return check
-	}
-	//nolint:gosec // statfs block size is always positive.
-	freeBytes := stat.Bavail * uint64(stat.Bsize)
-	check.Status = diagnosePass
-	check.Detail = formatGiB(freeBytes) + " free on the state directory's volume"
-	return check
-}
-
-func formatGiB(bytes uint64) string {
-	return fmt.Sprintf("%.1fGiB", float64(bytes)/(1<<30))
-}
 
 func lookPath(name string) (string, error) {
 	return exec.LookPath(name)

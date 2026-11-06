@@ -6,3 +6,7 @@ package command
 func virtualizationSupport() (bool, string) {
 	return false, ""
 }
+
+func checkDiskSpace(string) diagnoseCheck {
+	return diagnoseCheck{Name: "Disk space", Status: diagnoseSkip, Detail: "disk space check is not implemented on this platform"}
+}
