@@ -14,12 +14,14 @@ import (
 )
 
 // Kit is a local, unsigned kit definition. Remote OCI kits and signatures are
-// deliberately out of scope for this parser.
+// deliberately out of scope for this parser. V3 holds a Docker Sandboxes
+// schemaVersion "3" descriptor, which is offline-inspection only.
 type Kit struct {
-	APIVersion string   `yaml:"apiVersion"`
-	Kind       string   `yaml:"kind"`
-	Metadata   Metadata `yaml:"metadata"`
-	Spec       Spec     `yaml:"spec"`
+	APIVersion string        `yaml:"apiVersion"`
+	Kind       string        `yaml:"kind"`
+	Metadata   Metadata      `yaml:"metadata"`
+	Spec       Spec          `yaml:"spec"`
+	V3         *V3Descriptor `yaml:"-" json:"-"`
 }
 
 // dockerV2Kit is the deliberately supported Docker Sandboxes v2 subset.
@@ -114,7 +116,9 @@ func Load(path string) (Kit, error) {
 	if err != nil {
 		return Kit{}, fmt.Errorf("inspect kit reference: %w", err)
 	}
+	directory := ""
 	if info.IsDir() {
+		directory = path
 		path, err = findKitSpec(path)
 		if err != nil {
 			return Kit{}, err
@@ -125,11 +129,42 @@ func Load(path string) (Kit, error) {
 		return Kit{}, fmt.Errorf("open kit: %w", err)
 	}
 	defer func() { _ = file.Close() }()
-	return Decode(file)
+	doc, err := Decode(file)
+	if err != nil {
+		return Kit{}, err
+	}
+	if doc.V3 != nil {
+		doc.V3.NeedsBuild = v3NeedsBuild(doc.V3, directory)
+	}
+	return doc, nil
+}
+
+// v3NeedsBuild reports whether applying the descriptor requires a kit
+// builder: any content recipe, a set, a workload (its layers are the root
+// filesystem), or a companion <stem>.dockerfile next to the descriptor.
+func v3NeedsBuild(doc *V3Descriptor, directory string) bool {
+	if doc.Kind == "set" || doc.Kind == "workload" || doc.Kind == "sandbox" || doc.Build != "" || doc.Dockerfile != "" {
+		return true
+	}
+	if directory == "" {
+		return false
+	}
+	// Directory form is <kit>/<kit>.yaml; the companion recipe uses the
+	// directory name as its stem.
+	stem := filepath.Base(directory)
+	for _, name := range []string{stem + ".dockerfile", "Dockerfile"} {
+		if info, err := os.Stat(filepath.Join(directory, name)); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func findKitSpec(directory string) (string, error) {
-	for _, name := range []string{"spec.yaml", "spec.yml"} {
+	stem := filepath.Base(directory)
+	// Docker kit v3 sources use <kit>/<kit>.yaml; v2 and Rheic kits use
+	// spec.yaml. Prefer the stem-named descriptor when it exists.
+	for _, name := range []string{stem + ".yaml", stem + ".yml", "spec.yaml", "spec.yml"} {
 		candidate := filepath.Join(directory, name)
 		info, err := os.Stat(candidate)
 		if err == nil && info.Mode().IsRegular() {
@@ -139,7 +174,7 @@ func findKitSpec(directory string) (string, error) {
 			return "", fmt.Errorf("inspect kit spec: %w", err)
 		}
 	}
-	return "", errors.New("kit directory requires spec.yaml or spec.yml")
+	return "", errors.New("kit directory requires <name>.yaml, spec.yaml or spec.yml")
 }
 
 // Decode parses a kit from r.
@@ -161,13 +196,18 @@ func Decode(r io.Reader) (Kit, error) {
 	if err != nil {
 		return Kit{}, err
 	}
-	if err := doc.Validate(); err != nil {
-		return Kit{}, err
+	if doc.V3 == nil {
+		if err := doc.Validate(); err != nil {
+			return Kit{}, err
+		}
 	}
 	return doc, nil
 }
 
 func decodeDockerOrLocal(data []byte, schemaVersion string) (Kit, error) {
+	if isV3Data(data) {
+		return decodeV3(data)
+	}
 	if schemaVersion == "2" {
 		return decodeDockerV2(data)
 	}
@@ -187,7 +227,7 @@ func decodeDockerV2(data []byte) (Kit, error) {
 	if err := decoder.Decode(&source); err != nil {
 		return Kit{}, fmt.Errorf("parse Docker v2 kit: %w", err)
 	}
-	if source.Kind != "sandbox" {
+	if source.Kind != v3KindSandbox {
 		return Kit{}, fmt.Errorf("unsupported Docker v2 kit kind %q", source.Kind)
 	}
 	return Kit{APIVersion: "rheic.dev/v1alpha1", Kind: "Kit", Metadata: Metadata{Name: source.Name},

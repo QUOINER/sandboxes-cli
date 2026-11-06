@@ -21,9 +21,10 @@ import (
 
 const kitUsage = `Usage: rsbx kit COMMAND
 
-Manage local Rheic kits and the supported Docker Kits v2 sandbox subset. Kits
-are unsigned local inputs; remote OCI kits, mixins, signatures and MCP allowlists
-are not implemented yet.
+Manage local Rheic kits, the supported Docker Kits v2 sandbox subset and
+Docker kit v3 descriptors (offline inspection only; no kit builder is
+implemented). Kits are unsigned local inputs; remote OCI kits, mixins,
+signatures and MCP allowlists are not implemented yet.
 
 Commands:
   inspect FILE_OR_DIR [--format table|json|yaml]   validate and print a kit
@@ -74,11 +75,48 @@ func (r *Runner) kitInspect(args []string) int {
 		r.error(err)
 		return 1
 	}
+	if doc.V3 != nil {
+		return r.printV3Kit(doc.V3, selected)
+	}
 	switch selected {
 	case listFormatTable:
 		tw := tabwriter.NewWriter(r.Out, 0, 4, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tIMAGE\tPROFILE\tMOUNTS")
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", doc.Metadata.Name, doc.Spec.Agent, doc.Spec.Image, doc.Spec.PolicyProfile, strings.Join(doc.Paths(), ","))
+		if err := tw.Flush(); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
+	case listFormatYAML:
+		data, err := yaml.Marshal(doc)
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		_, _ = r.Out.Write(data)
+		return 0
+	default:
+		encoder := json.NewEncoder(r.Out)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(doc); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
+	}
+}
+
+func (r *Runner) printV3Kit(doc *kit.V3Descriptor, selected string) int {
+	switch selected {
+	case listFormatTable:
+		tw := tabwriter.NewWriter(r.Out, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "KIND\tNAME\tVERSION\tCAPABILITIES")
+		label := doc.DisplayName
+		if label == "" {
+			label = "-"
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", doc.Kind, label, doc.Version, len(doc.Capabilities))
 		if err := tw.Flush(); err != nil {
 			r.error(err)
 			return 1
@@ -169,6 +207,9 @@ func applyKit(ctx context.Context, path string, agent, image, profile *string, p
 	doc, err := kit.Load(path)
 	if err != nil {
 		return err
+	}
+	if doc.V3 != nil {
+		return errors.New("kit v3 descriptors require a kit builder; building and applying v3 kits is not implemented")
 	}
 	for _, value := range []struct {
 		label   string
