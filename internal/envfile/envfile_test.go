@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadMergesFilesAndDiscardsEnvironmentValues(t *testing.T) {
@@ -198,7 +200,7 @@ func TestLoadArgumentDefaultsAndFilesOverrideInOrder(t *testing.T) {
 	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nargs:\n  mode:\n    default: stable\n    enum: [stable, preview, nightly]\n")
 	first := filepath.Join(t.TempDir(), "first.args")
 	second := filepath.Join(t.TempDir(), "second.args")
-	writeEnvFile(t, first, "mode=not-in-enum\n")
+	writeEnvFile(t, first, "# base value is shadowed by the next file\n  \nmode=not-in-enum\n")
 	writeEnvFile(t, second, "mode=nightly\n")
 	plan, err := LoadWithArguments([]string{path}, ArgumentOverrides{Files: []string{first, second}})
 	if err != nil {
@@ -206,6 +208,72 @@ func TestLoadArgumentDefaultsAndFilesOverrideInOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(plan.ArgumentNames, []string{"mode"}) {
 		t.Fatalf("argument names = %#v", plan.ArgumentNames)
+	}
+}
+
+func TestLoadRejectsInvalidBaseArgumentDefaultEvenWhenOverridden(t *testing.T) {
+	first := filepath.Join(t.TempDir(), "base.yaml")
+	second := filepath.Join(t.TempDir(), "override.yaml")
+	writeEnvFile(t, first, "schemaVersion: \"1\"\nagent: shell\nargs:\n  mode:\n    default: invalid\n    enum: [valid]\n")
+	writeEnvFile(t, second, "schemaVersion: \"1\"\nargs:\n  mode:\n    default: valid\n    enum: [valid]\n")
+	if _, err := Load([]string{first, second}); err == nil {
+		t.Fatal("Load() succeeded with an invalid base argument default")
+	}
+}
+
+func TestLoadInterpolatesArgumentReferencesWithoutRetainingValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nargs:\n  workspace:\n    required: true\n  cpus:\n    default: \"4\"\n  suffix:\n    default: preview\nenv:\n  API_URL: 'https://${{ env.args.workspace }}/v1'\n  DEPLOYMENT: ${{ env.args.suffix }}\nsandboxOptions:\n  cpus: ${{ env.args.cpus }}\n")
+	plan, err := LoadWithArguments([]string{path}, ArgumentOverrides{Values: []string{"workspace=api.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(plan.ArgumentNames, []string{"cpus", "suffix", "workspace"}) {
+		t.Fatalf("argument names = %#v", plan.ArgumentNames)
+	}
+	if plan.CPUs == nil || *plan.CPUs != 4 {
+		t.Fatalf("substituted CPU value = %#v, want 4", plan.CPUs)
+	}
+	if plan.arguments != nil {
+		t.Fatal("argument declarations/default values were retained in returned plan")
+	}
+	if !reflect.DeepEqual(plan.EnvironmentKeys, []string{"API_URL", "DEPLOYMENT"}) {
+		t.Fatalf("environment keys = %#v", plan.EnvironmentKeys)
+	}
+}
+
+func TestLoadRejectsUnknownAndSelfReferencingArguments(t *testing.T) {
+	cases := map[string]string{
+		"unknown":        "env:\n  TOKEN: ${{ env.args.missing }}\n",
+		"self reference": "args:\n  name:\n    default: ${{ env.args.name }}\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+			writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\n"+body)
+			if _, err := LoadWithArguments([]string{path}, ArgumentOverrides{}); err == nil {
+				t.Fatal("LoadWithArguments() succeeded; want rejection")
+			}
+		})
+	}
+}
+
+func TestInterpolateArgumentReferencesPreservesEscapedAndSubstitutedText(t *testing.T) {
+	node := yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStringTag, Style: yaml.SingleQuotedStyle, Value: "$${{ env.args.first }} / ${{ env.args.first }}"}
+	values := map[string]string{"first": "${{ env.args.second }}", "second": "expanded"}
+	if err := interpolateScalar(&node, values); err != nil {
+		t.Fatal(err)
+	}
+	want := "${{ env.args.first }} / ${{ env.args.second }}"
+	if node.Value != want {
+		t.Fatalf("interpolated scalar = %q, want %q", node.Value, want)
+	}
+}
+
+func TestReplaceArgumentReferencesRejectsExpandedValueOverLimit(t *testing.T) {
+	source := "${{ env.args.value }}${{ env.args.value }}"
+	if _, err := replaceArgumentReferences(source, argumentReference.FindAllStringSubmatchIndex(source, -1), map[string]string{"value": strings.Repeat("x", maxFileSize/2+1)}); err == nil {
+		t.Fatal("replaceArgumentReferences() succeeded beyond the expansion limit")
 	}
 }
 
@@ -307,6 +375,19 @@ func FuzzParseArgumentValues(f *testing.F) {
 					t.Fatalf("accepted invalid argument name %q", name)
 				}
 			}
+		}
+	})
+}
+
+func FuzzInterpolateArgumentReferences(f *testing.F) {
+	f.Add("${{ env.args.value }}", "plain")
+	f.Add("prefix-${{ env.args.value }}-suffix", "with spaces")
+	f.Add("$${{ env.args.value }}", "literal")
+	f.Fuzz(func(t *testing.T, source, value string) {
+		node := yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStringTag, Style: yaml.SingleQuotedStyle, Value: source}
+		err := interpolateScalar(&node, map[string]string{"value": value})
+		if err == nil && len(node.Value) > maxFileSize {
+			t.Fatalf("interpolated scalar length %d exceeds limit", len(node.Value))
 		}
 	})
 }

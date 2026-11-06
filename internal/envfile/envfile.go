@@ -17,14 +17,17 @@ import (
 )
 
 const (
-	maxFileSize  = 1 << 20
-	maxYAMLNodes = 20_000
-	maxYAMLDepth = 64
+	maxFileSize   = 1 << 20
+	maxYAMLNodes  = 20_000
+	maxYAMLDepth  = 64
+	yamlStringTag = "!!str"
+	argumentKey   = "args"
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 var argumentIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 var directoryReference = regexp.MustCompile(`\$\{\{\s*env\.([A-Za-z][A-Za-z0-9]*)\s*\}\}`)
+var argumentReference = regexp.MustCompile(`\$\{\{\s*env\.args\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}`)
 
 // ValidateName checks a name before the CLI applies a command-line override.
 func ValidateName(name string) error {
@@ -160,20 +163,27 @@ func LoadWithArguments(paths []string, overrides ArgumentOverrides) (Plan, error
 }
 
 func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan, error) {
-	var plan Plan
-	for _, path := range paths {
-		filePath, err := resolveFile(path)
-		if err != nil {
+	documents, arguments, err := readSourceDocuments(paths)
+	if err != nil {
+		return Plan{}, err
+	}
+	names, argumentValues, err := resolveArgumentValues(arguments, overrides)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan := Plan{arguments: arguments}
+	for _, source := range documents {
+		if err := interpolateArgumentReferences(source.node, argumentValues); err != nil {
 			return Plan{}, err
 		}
-		doc, err := readDocument(filePath)
+		doc, err := decodeDocumentNode(source.node)
 		if err != nil {
 			return Plan{}, err
 		}
 		if err := doc.validate(); err != nil {
 			return Plan{}, err
 		}
-		plan, err = mergeDocument(plan, doc, filePath, projectDir)
+		plan, err = mergeDocument(plan, doc, source.path, projectDir)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -181,13 +191,49 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 	if plan.Agent == "" {
 		return Plan{}, errors.New("environment requires an agent")
 	}
-	if err := applyArgumentOverrides(&plan, overrides); err != nil {
-		return Plan{}, err
-	}
+	plan.ArgumentNames = names
 	plan.arguments = nil
 	sort.Strings(plan.EnvironmentKeys)
 	sort.Strings(plan.ArgumentNames)
 	return plan, nil
+}
+
+type sourceDocument struct {
+	path string
+	node *yaml.Node
+}
+
+func readSourceDocuments(paths []string) ([]sourceDocument, map[string]argumentDeclaration, error) {
+	documents := make([]sourceDocument, 0, len(paths))
+	var arguments map[string]argumentDeclaration
+	for _, path := range paths {
+		filePath, err := resolveFile(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		root, err := readDocumentNode(filePath)
+		if err != nil {
+			return nil, nil, err
+		}
+		declarations, err := decodeArgumentDefinitions(root)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := validateArgumentDefinitions(declarations); err != nil {
+			return nil, nil, err
+		}
+		if err := rejectArgumentReferencesInDefinitions(root); err != nil {
+			return nil, nil, err
+		}
+		if len(declarations) > 0 && arguments == nil {
+			arguments = make(map[string]argumentDeclaration)
+		}
+		for name, declaration := range declarations {
+			arguments[name] = declaration
+		}
+		documents = append(documents, sourceDocument{path: filePath, node: root})
+	}
+	return documents, arguments, nil
 }
 
 // LoadDefault resolves the current-directory environment with optional
@@ -306,32 +352,42 @@ func (d document) validate() error {
 
 func validateArgumentDefinitions(arguments map[string]argumentDeclaration) error {
 	for name, declaration := range arguments {
-		if !argumentIdentifier.MatchString(name) {
-			return errors.New("environment argument name is invalid")
-		}
-		hasDefault := declaration.Default != nil
-		required := declaration.Required != nil && *declaration.Required
-		if hasDefault == required || declaration.Required != nil && !*declaration.Required && !hasDefault {
-			return errors.New("environment argument must set exactly one of default or required: true")
-		}
-		if declaration.Enum != nil && declaration.Pattern != nil {
-			return errors.New("environment argument cannot set both enum and pattern")
-		}
-		if declaration.Pattern != nil {
-			if _, err := regexp.Compile(*declaration.Pattern); err != nil {
-				return errors.New("environment argument pattern is invalid")
-			}
+		if err := validateArgumentDefinition(name, declaration); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func applyArgumentOverrides(plan *Plan, overrides ArgumentOverrides) error {
+func validateArgumentDefinition(name string, declaration argumentDeclaration) error {
+	if !argumentIdentifier.MatchString(name) {
+		return errors.New("environment argument name is invalid")
+	}
+	hasDefault := declaration.Default != nil
+	required := declaration.Required != nil && *declaration.Required
+	if hasDefault == required || declaration.Required != nil && !*declaration.Required && !hasDefault {
+		return errors.New("environment argument must set exactly one of default or required: true")
+	}
+	if declaration.Enum != nil && declaration.Pattern != nil {
+		return errors.New("environment argument cannot set both enum and pattern")
+	}
+	if declaration.Pattern != nil {
+		if _, err := regexp.Compile(*declaration.Pattern); err != nil {
+			return errors.New("environment argument pattern is invalid")
+		}
+	}
+	if declaration.Default != nil {
+		return validateArgumentValue(*declaration.Default, declaration)
+	}
+	return nil
+}
+
+func resolveArgumentValues(arguments map[string]argumentDeclaration, overrides ArgumentOverrides) ([]string, map[string]string, error) {
 	provided := make(map[string]string)
 	for _, path := range overrides.Files {
 		values, err := readArgumentFile(path)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		for name, value := range values {
 			provided[name] = value
@@ -339,30 +395,193 @@ func applyArgumentOverrides(plan *Plan, overrides ArgumentOverrides) error {
 	}
 	cliValues := make(map[string]string)
 	if err := parseArgumentValues(overrides.Values, cliValues); err != nil {
-		return err
+		return nil, nil, err
 	}
 	for name, value := range cliValues {
 		provided[name] = value
 	}
 	for name := range provided {
-		if _, ok := plan.arguments[name]; !ok {
-			return errors.New("value supplied for an undeclared environment argument")
+		if _, ok := arguments[name]; !ok {
+			return nil, nil, errors.New("value supplied for an undeclared environment argument")
 		}
 	}
-	for name, declaration := range plan.arguments {
+	values := make(map[string]string, len(arguments))
+	names := make([]string, 0, len(arguments))
+	for name, declaration := range arguments {
 		value, hasValue := provided[name]
 		if !hasValue && declaration.Default != nil {
 			value = *declaration.Default
 			hasValue = true
 		}
 		if !hasValue {
-			return errors.New("required environment argument is missing")
+			return nil, nil, errors.New("required environment argument is missing")
 		}
 		if err := validateArgumentValue(value, declaration); err != nil {
+			return nil, nil, err
+		}
+		values[name] = value
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, values, nil
+}
+
+func decodeArgumentDefinitions(root *yaml.Node) (map[string]argumentDeclaration, error) {
+	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("environment file must be a YAML mapping")
+	}
+	for i := 0; i+1 < len(root.Content[0].Content); i += 2 {
+		key, value := root.Content[0].Content[i], root.Content[0].Content[i+1]
+		if key.Value != argumentKey {
+			continue
+		}
+		var args map[string]argumentDeclaration
+		if err := value.Decode(&args); err != nil {
+			return nil, errors.New("environment file has invalid argument declarations")
+		}
+		return args, nil
+	}
+	return make(map[string]argumentDeclaration), nil
+}
+
+func rejectArgumentReferencesInDefinitions(root *yaml.Node) error {
+	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
+		return errors.New("environment file must be a YAML mapping")
+	}
+	for i := 0; i+1 < len(root.Content[0].Content); i += 2 {
+		if root.Content[0].Content[i].Value == argumentKey && nodeContainsArgumentReference(root.Content[0].Content[i+1]) {
+			return errors.New("environment arguments cannot reference other arguments")
+		}
+	}
+	return nil
+}
+
+func nodeContainsArgumentReference(node *yaml.Node) bool {
+	if node.Kind == yaml.ScalarNode && node.Tag == yamlStringTag && argumentReference.FindStringIndex(node.Value) != nil {
+		return true
+	}
+	for _, child := range node.Content {
+		if nodeContainsArgumentReference(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func interpolateArgumentReferences(root *yaml.Node, values map[string]string) error {
+	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
+		return errors.New("environment file must be a YAML mapping")
+	}
+	budget := 0
+	for i := 0; i+1 < len(root.Content[0].Content); i += 2 {
+		key, value := root.Content[0].Content[i], root.Content[0].Content[i+1]
+		if key.Value == argumentKey {
+			continue
+		}
+		if err := interpolateNode(value, values, &budget); err != nil {
 			return err
 		}
-		plan.ArgumentNames = append(plan.ArgumentNames, name)
 	}
+	return nil
+}
+
+func interpolateNode(node *yaml.Node, values map[string]string, budget *int) error {
+	if err := interpolateScalar(node, values); err != nil {
+		return err
+	}
+	if node.Kind == yaml.ScalarNode {
+		*budget += len(node.Value)
+		if *budget > maxFileSize {
+			return errors.New("expanded environment file exceeds size limit")
+		}
+	}
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if nodeContainsArgumentReference(node.Content[i]) {
+				return errors.New("environment argument references cannot appear in field names")
+			}
+			if err := interpolateNode(node.Content[i], values, budget); err != nil {
+				return err
+			}
+			if err := interpolateNode(node.Content[i+1], values, budget); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, child := range node.Content {
+		if err := interpolateNode(child, values, budget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func interpolateScalar(node *yaml.Node, values map[string]string) error {
+	if node.Kind != yaml.ScalarNode || node.Tag != yamlStringTag {
+		return nil
+	}
+	matches := argumentReference.FindAllStringSubmatchIndex(node.Value, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	resolved, err := replaceArgumentReferences(node.Value, matches, values)
+	if err != nil {
+		return err
+	}
+	if len(matches) == 1 && matches[0][0] == 0 && matches[0][1] == len(node.Value) && node.Style == 0 {
+		return setPlainScalar(node, resolved)
+	}
+	node.Value = resolved
+	return nil
+}
+
+func replaceArgumentReferences(source string, matches [][]int, values map[string]string) (string, error) {
+	outputSize := len(source)
+	for _, match := range matches {
+		if match[0] > 0 && source[match[0]-1] == '$' {
+			outputSize--
+			continue
+		}
+		value, ok := values[source[match[2]:match[3]]]
+		if !ok {
+			return "", errors.New("environment references an undeclared argument")
+		}
+		outputSize += len(value) - (match[1] - match[0])
+		if outputSize > maxFileSize {
+			return "", errors.New("expanded environment file exceeds size limit")
+		}
+	}
+	var resolved strings.Builder
+	resolved.Grow(outputSize)
+	last := 0
+	for _, match := range matches {
+		if match[0] > 0 && source[match[0]-1] == '$' {
+			resolved.WriteString(source[last : match[0]-1])
+			resolved.WriteString(source[match[0]:match[1]])
+			last = match[1]
+			continue
+		}
+		value, ok := values[source[match[2]:match[3]]]
+		if !ok {
+			return "", errors.New("environment references an undeclared argument")
+		}
+		resolved.WriteString(source[last:match[0]])
+		resolved.WriteString(value)
+		last = match[1]
+	}
+	resolved.WriteString(source[last:])
+	return resolved.String(), nil
+}
+
+func setPlainScalar(node *yaml.Node, value string) error {
+	var parsed yaml.Node
+	if err := yaml.Unmarshal([]byte(value), &parsed); err != nil || parsed.Kind != yaml.DocumentNode || len(parsed.Content) != 1 || parsed.Content[0].Kind != yaml.ScalarNode {
+		return errors.New("environment argument must substitute to a YAML scalar")
+	}
+	scalar := parsed.Content[0]
+	node.Tag = scalar.Tag
+	node.Value = scalar.Value
 	return nil
 }
 
@@ -419,7 +638,8 @@ func readArgumentFile(path string) (map[string]string, error) {
 	values := make(map[string]string)
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSuffix(line, "\r")
-		if line == "" {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		if err := parseArgumentValues([]string{line}, values); err != nil {
@@ -540,36 +760,56 @@ func resolveFile(path string) (string, error) {
 	return absolute, nil
 }
 
-func readDocument(path string) (document, error) {
+func readDocumentNode(path string) (*yaml.Node, error) {
 	file, err := os.Open(path) // #nosec G304 -- path is an explicit user-selected environment file
 	if err != nil {
-		return document{}, errors.New("open environment file")
+		return nil, errors.New("open environment file")
 	}
 	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
 	if err != nil || len(data) > maxFileSize {
-		return document{}, errors.New("read environment file")
+		return nil, errors.New("read environment file")
 	}
-	return decodeDocument(data)
+	return decodeDocumentNodeFromBytes(data)
 }
 
 func decodeDocument(data []byte) (document, error) {
+	root, err := decodeDocumentNodeFromBytes(data)
+	if err != nil {
+		return document{}, err
+	}
+	return decodeDocumentNode(root)
+}
+
+func decodeDocumentNodeFromBytes(data []byte) (*yaml.Node, error) {
 	if len(data) > maxFileSize {
-		return document{}, errors.New("read environment file")
+		return nil, errors.New("read environment file")
 	}
 	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
 	var root yaml.Node
 	if err := decoder.Decode(&root); err != nil {
-		return document{}, errors.New("environment file has invalid YAML or unsupported fields")
+		return nil, errors.New("environment file has invalid YAML or unsupported fields")
 	}
 	if err := validateYAMLTree(&root); err != nil {
-		return document{}, err
+		return nil, err
 	}
 	var trailing yaml.Node
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document{}, errors.New("environment file must contain exactly one YAML document")
+		return nil, errors.New("environment file must contain exactly one YAML document")
 	}
-	decoder = yaml.NewDecoder(strings.NewReader(string(data)))
+	return &root, nil
+}
+
+func decodeDocumentNode(root *yaml.Node) (document, error) {
+	var encoded strings.Builder
+	encoder := yaml.NewEncoder(&encoded)
+	if err := encoder.Encode(root); err != nil {
+		return document{}, errors.New("environment file has invalid YAML or unsupported fields")
+	}
+	if err := encoder.Close(); err != nil {
+		return document{}, errors.New("environment file has invalid YAML or unsupported fields")
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(encoded.String()))
 	decoder.KnownFields(true)
 	var doc document
 	if err := decoder.Decode(&doc); err != nil {
