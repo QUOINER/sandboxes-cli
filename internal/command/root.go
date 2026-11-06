@@ -1808,11 +1808,7 @@ Extensions:
   template  List and inspect built-in templates
 
 Unsupported Docker Sandboxes commands:
-<<<<<<< HEAD
-  env, mcp, move, setup, skills, ttl, volume
-=======
-  agents, mcp, move, setup, skills, ttl, volume
->>>>>>> 828ad16 (Implement static environment plan preview)
+  mcp, move, setup, skills, ttl, volume
 
 Flags:
       --socket PATH  Local daemon endpoint
