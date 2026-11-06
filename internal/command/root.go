@@ -582,7 +582,7 @@ Passing these options to Rheic currently fails closed.
 
 func (r *Runner) secretSetHelp() int {
 	const usage = `Description:
-  Create or update a service secret.
+  Create or update a service secret or registry credential.
 
 Available services:
   anthropic, copilot, cursor, devin, droid, github, google, groq, mistral,
@@ -596,18 +596,36 @@ Escape to cancel. Values are stored in the host credential vault. Without
 --force, an existing value is never overwritten. For scripts, pass SERVICE
 explicitly and provide the value with --token or standard input.
 
+Registry credentials
+  Use --registry to store a registry credential. Without --sandbox or
+  --all-sandboxes, it is host-only and is not injected into sandboxes.
+  --all-sandboxes enables brokered use in all sandboxes; --sandbox scopes it
+  to one sandbox. Credentials are provided to the host broker, not guest env.
+  Cross-host registry authentication endpoints are not supported yet.
+
 Examples:
   rsbx secret set github
   rsbx secret set openai --sandbox my-sandbox
   rsbx secret set openai --oauth
   rsbx secret set github -t VALUE
+  printf '%s' "$GHCR_TOKEN" | rsbx secret set --registry ghcr.io \
+    --username USER --password-stdin
+  printf '%s' "$GHCR_TOKEN" | rsbx secret set --registry ghcr.io \
+    --username USER --password-stdin --all-sandboxes
 
 Flags:
       --sandbox string  Scope the secret to one sandbox
   -t, --token string   Secret value (less secure: visible in shell history)
       --oauth           Sign in to the global OpenAI account on the host
-      --ref string      Secret reference (not implemented)
-      --command string  Secret command (not implemented)
+      --ref string      Use a 1Password op:// reference or AWS Secrets Manager ARN
+      --command string  Run a host shell command to resolve a secret (can access host files)
+      --refresh string  Refresh source on-demand or after a duration (default: 55m)
+      --no-verify       Store a source without resolving it now
+      --show-error      Show provider stderr on initial verification failure (may contain secrets)
+      --registry string Registry hostname for pull credentials
+      --username string Registry username
+      --password-stdin Read registry password or token from stdin
+      --all-sandboxes   Enable brokered registry use in every sandbox
   -f, --force           Overwrite an existing secret
   -h, --help            Show this help
 `
