@@ -29,6 +29,22 @@ func TestEnvironmentPlanIsReadOnlyAndRedactsValues(t *testing.T) {
 	}
 }
 
+func TestEnvironmentPlanEscapesWorkspaceControlCharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	body := "schemaVersion: \"1\"\nagent: shell\nworkspace: \"line\\nINJECT\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	runner := NewRunner(&stdout, &stderr)
+	if code := runner.Run(context.Background(), []string{"env", "plan", path}); code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "line\nINJECT") || !strings.Contains(stdout.String(), `line\nINJECT`) {
+		t.Fatalf("workspace path was not safely quoted: %q", stdout.String())
+	}
+}
+
 func TestEnvironmentMutatingCommandsFailClosed(t *testing.T) {
 	for _, args := range [][]string{{"env", "create"}, {"env", "run", "./"}, {"env", "rm", "x"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {

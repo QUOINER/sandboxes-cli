@@ -37,7 +37,7 @@ func (r *Runner) environment(args []string) int {
 	var out strings.Builder
 	fmt.Fprintln(&out, "Static preview (no changes applied; daemon state not queried)")
 	fmt.Fprintf(&out, "Name: %s\nAgent: %s\n", displayValue(plan.Name), plan.Agent)
-	fmt.Fprintf(&out, "Workspace: %s\n", displayValue(plan.Workspace))
+	fmt.Fprintf(&out, "Workspace: %s\n", displayPath(plan.Workspace))
 	fmt.Fprintf(&out, "Additional workspaces: %d\n", len(plan.AdditionalWorkspaces))
 	for _, workspace := range plan.AdditionalWorkspaces {
 		mode := "read-write"
@@ -68,4 +68,11 @@ func displayValue(value string) string {
 		return "(unset)"
 	}
 	return value
+}
+
+func displayPath(value string) string {
+	if value == "" {
+		return "(unset)"
+	}
+	return fmt.Sprintf("%q", value)
 }
