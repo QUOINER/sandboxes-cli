@@ -486,31 +486,37 @@ func interpolateArgumentReferences(root *yaml.Node, values map[string]string) er
 }
 
 func interpolateNode(node *yaml.Node, values map[string]string, budget *int) error {
-	if err := interpolateScalar(node, values); err != nil {
-		return err
-	}
 	if node.Kind == yaml.ScalarNode {
+		if err := interpolateScalar(node, values); err != nil {
+			return err
+		}
 		*budget += len(node.Value)
 		if *budget > maxFileSize {
 			return errors.New("expanded environment file exceeds size limit")
 		}
+		return nil
 	}
 	if node.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			if nodeContainsArgumentReference(node.Content[i]) {
-				return errors.New("environment argument references cannot appear in field names")
-			}
-			if err := interpolateNode(node.Content[i], values, budget); err != nil {
-				return err
-			}
-			if err := interpolateNode(node.Content[i+1], values, budget); err != nil {
-				return err
-			}
-		}
-		return nil
+		return interpolateMappingNode(node, values, budget)
 	}
 	for _, child := range node.Content {
 		if err := interpolateNode(child, values, budget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func interpolateMappingNode(node *yaml.Node, values map[string]string, budget *int) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if nodeContainsArgumentReference(key) {
+			return errors.New("environment argument references cannot appear in field names")
+		}
+		if err := interpolateNode(key, values, budget); err != nil {
+			return err
+		}
+		if err := interpolateNode(value, values, budget); err != nil {
 			return err
 		}
 	}
