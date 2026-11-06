@@ -43,6 +43,7 @@ func ValidateName(name string) error {
 type Workspace struct {
 	Path     string
 	ReadOnly bool
+	Redacted bool
 }
 
 // Plan contains only non-secret information safe to display in a static
@@ -50,14 +51,19 @@ type Workspace struct {
 // have been collected.
 type Plan struct {
 	Name                 string
+	NameRedacted         bool
 	Agent                string
+	AgentRedacted        bool
 	Workspace            string
+	WorkspaceRedacted    bool
 	AdditionalWorkspaces []Workspace
 	Ports                []Port
 	ArgumentNames        []string
 	EnvironmentKeys      []string
 	CPUs                 *uint32
+	CPUsRedacted         bool
 	Memory               string
+	MemoryRedacted       bool
 }
 
 // ArgumentOverrides contains values read from argument files followed by
@@ -77,6 +83,15 @@ type document struct {
 	Args                 map[string]argumentDeclaration `yaml:"args"`
 	Env                  map[string]string              `yaml:"env"`
 	SandboxOptions       sandboxOptions                 `yaml:"sandboxOptions"`
+}
+
+type argumentReferenceUsage struct {
+	name                 bool
+	agent                bool
+	workspace            bool
+	additionalWorkspaces []bool
+	ports                []bool
+	sandboxOptions       bool
 }
 
 type workspaceValue struct {
@@ -122,6 +137,7 @@ type Port struct {
 	Host     *uint16
 	Protocol string
 	HostIP   string
+	Redacted bool
 }
 
 type portMapping struct {
@@ -183,6 +199,7 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 		if digest != source.digest {
 			return Plan{}, errors.New("environment file changed during preview; retry")
 		}
+		referenceUsage := findArgumentReferenceUsage(root)
 		if err := stripArgumentDefinitions(root); err != nil {
 			return Plan{}, err
 		}
@@ -196,7 +213,7 @@ func load(paths []string, projectDir string, overrides ArgumentOverrides) (Plan,
 		if err := doc.validate(); err != nil {
 			return Plan{}, err
 		}
-		plan, err = mergeDocument(plan, doc, source.path)
+		plan, err = mergeDocument(plan, doc, source.path, referenceUsage)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -295,12 +312,14 @@ func LoadDefaultWithArguments(homeDir, workingDir string, overrides ArgumentOver
 	return load(paths, filepath.Clean(projectDir), overrides)
 }
 
-func mergeDocument(plan Plan, doc document, filePath string) (Plan, error) {
+func mergeDocument(plan Plan, doc document, filePath string, references argumentReferenceUsage) (Plan, error) {
 	if doc.Name != "" {
 		plan.Name = doc.Name
+		plan.NameRedacted = references.name
 	}
 	if doc.Agent != "" {
 		plan.Agent = doc.Agent
+		plan.AgentRedacted = references.agent
 	}
 	if doc.Workspace.Path != "" {
 		resolved, err := resolveWorkspace(filePath, doc.Workspace.Path)
@@ -308,29 +327,34 @@ func mergeDocument(plan Plan, doc document, filePath string) (Plan, error) {
 			return Plan{}, err
 		}
 		plan.Workspace = resolved
+		plan.WorkspaceRedacted = references.workspace
 	}
-	for _, mount := range doc.AdditionalWorkspaces {
+	for index, mount := range doc.AdditionalWorkspaces {
 		resolved, err := resolveWorkspace(filePath, mount.Path)
 		if err != nil {
 			return Plan{}, err
 		}
-		plan.AdditionalWorkspaces = append(plan.AdditionalWorkspaces, Workspace{Path: resolved, ReadOnly: mount.ReadOnly})
+		redacted := index < len(references.additionalWorkspaces) && references.additionalWorkspaces[index]
+		plan.AdditionalWorkspaces = append(plan.AdditionalWorkspaces, Workspace{Path: resolved, ReadOnly: mount.ReadOnly, Redacted: redacted})
 	}
-	for _, port := range doc.Ports {
+	for index, port := range doc.Ports {
 		var host *uint16
 		if port.Host != nil {
 			value := *port.Host
 			host = &value
 		}
-		plan.Ports = append(plan.Ports, Port{Sandbox: *port.Sandbox, Host: host, Protocol: port.Protocol, HostIP: port.HostIP})
+		redacted := index < len(references.ports) && references.ports[index]
+		plan.Ports = append(plan.Ports, Port{Sandbox: *port.Sandbox, Host: host, Protocol: port.Protocol, HostIP: port.HostIP, Redacted: redacted})
 	}
 	plan.EnvironmentKeys = mergeEnvironmentKeys(plan.EnvironmentKeys, doc.Env)
 	if doc.SandboxOptions.CPUs != nil {
 		value := *doc.SandboxOptions.CPUs
 		plan.CPUs = &value
+		plan.CPUsRedacted = references.sandboxOptions
 	}
 	if doc.SandboxOptions.Memory != "" {
 		plan.Memory = doc.SandboxOptions.Memory
+		plan.MemoryRedacted = references.sandboxOptions
 	}
 	return plan, nil
 }
@@ -534,6 +558,53 @@ func rejectArgumentReferencesInDefinitions(root *yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+func findArgumentReferenceUsage(root *yaml.Node) argumentReferenceUsage {
+	usage := argumentReferenceUsage{}
+	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
+		return usage
+	}
+	for i := 0; i+1 < len(root.Content[0].Content); i += 2 {
+		key, value := root.Content[0].Content[i].Value, root.Content[0].Content[i+1]
+		switch key {
+		case "name":
+			usage.name = nodeContainsArgumentReference(value)
+		case "agent":
+			usage.agent = nodeContainsArgumentReference(value)
+		case "workspace":
+			usage.workspace = nodeContainsArgumentReference(value)
+		case "additionalWorkspaces":
+			usage.additionalWorkspaces = make([]bool, len(value.Content))
+			for index, item := range value.Content {
+				usage.additionalWorkspaces[index] = nodeContainsArgumentReference(item)
+			}
+		case "ports":
+			usage.ports = make([]bool, len(value.Content))
+			for index, item := range value.Content {
+				usage.ports[index] = nodeContainsArgumentReference(item)
+			}
+		case "sandboxOptions":
+			usage.sandboxOptions = nodeContainsArgumentReference(value)
+		}
+	}
+	return usage
+}
+
+func nodeContainsArgumentReference(node *yaml.Node) bool {
+	if node.Kind == yaml.ScalarNode && node.Tag == yamlStringTag {
+		for _, match := range environmentReference.FindAllStringSubmatchIndex(node.Value, -1) {
+			if strings.HasPrefix(node.Value[match[2]:match[3]], "args.") && (match[0] == 0 || node.Value[match[0]-1] != '$') {
+				return true
+			}
+		}
+	}
+	for _, child := range node.Content {
+		if nodeContainsArgumentReference(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func nodeContainsEnvironmentReference(node *yaml.Node) bool {

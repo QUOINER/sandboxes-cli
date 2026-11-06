@@ -57,6 +57,47 @@ func TestEnvironmentPlanArgumentOverridesAreRedacted(t *testing.T) {
 	}
 }
 
+func TestEnvironmentPlanRedactsArgumentsInterpolatedIntoPreviewFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
+	body := "schemaVersion: \"1\"\nname: ${{ env.args.name }}\nagent: ${{ env.args.agent }}\nworkspace: ${{ env.args.workspace }}\nadditionalWorkspaces:\n  - path: ${{ env.args.extra }}\nports:\n  - sandbox: ${{ env.args.port }}\nsandboxOptions:\n  cpus: ${{ env.args.cpus }}\n  memory: ${{ env.args.memory }}\nargs:\n"
+	for _, name := range []string{"name", "agent", "workspace", "extra", "port", "cpus", "memory"} {
+		body += "  " + name + ":\n    required: true\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	values := []string{
+		"name=private-name",
+		"agent=private-agent",
+		"workspace=private-workspace",
+		"extra=private-extra-workspace",
+		"port=32123",
+		"cpus=4",
+		"memory=2g",
+	}
+	args := make([]string, 0, 3+2*len(values))
+	args = append(args, "env", "plan", path)
+	for _, value := range values {
+		args = append(args, "--env-arg", value)
+	}
+	var stdout, stderr bytes.Buffer
+	runner := NewRunner(&stdout, &stderr)
+	if code := runner.Run(context.Background(), args); code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, value := range []string{"private-name", "private-agent", "private-workspace", "private-extra-workspace", "32123", "CPUs: 4", "2g"} {
+		if strings.Contains(output, value) {
+			t.Fatalf("interpolated argument value %q leaked: %q", value, output)
+		}
+	}
+	for _, field := range []string{"Name: <redacted>", "Agent: <redacted>", "Workspace: <redacted>", "  <redacted> (read-write)", "CPUs: <redacted>", "Memory: <redacted>"} {
+		if !strings.Contains(output, field) {
+			t.Fatalf("redacted field %q missing: %q", field, output)
+		}
+	}
+}
+
 func TestEnvironmentPlanEscapesWorkspaceControlCharacters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sbxenv.yaml")
 	body := "schemaVersion: \"1\"\nagent: shell\nworkspace: \"line\\nINJECT\"\n"

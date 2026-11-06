@@ -59,24 +59,28 @@ func (r *Runner) environment(args []string) int {
 	}
 	var out strings.Builder
 	fmt.Fprintln(&out, "Static preview (no changes applied; daemon state not queried)")
-	fmt.Fprintf(&out, "Name: %s\nAgent: %s\n", displayValue(plan.Name), plan.Agent)
-	fmt.Fprintf(&out, "Workspace: %s\n", displayPath(plan.Workspace))
+	fmt.Fprintf(&out, "Name: %s\nAgent: %s\n", displayPreviewValue(plan.Name, plan.NameRedacted), displayPreviewValue(plan.Agent, plan.AgentRedacted))
+	fmt.Fprintf(&out, "Workspace: %s\n", displayPreviewPath(plan.Workspace, plan.WorkspaceRedacted))
 	fmt.Fprintf(&out, "Additional workspaces: %d\n", len(plan.AdditionalWorkspaces))
 	for _, workspace := range plan.AdditionalWorkspaces {
 		mode := "read-write"
 		if workspace.ReadOnly {
 			mode = "read-only"
 		}
-		fmt.Fprintf(&out, "  %q (%s)\n", workspace.Path, mode)
+		fmt.Fprintf(&out, "  %s (%s)\n", displayPreviewPath(workspace.Path, workspace.Redacted), mode)
 	}
 	writePortPreview(&out, plan.Ports)
 	writeRedactedNames(&out, "Environment keys", plan.EnvironmentKeys)
 	writeRedactedNames(&out, "Environment arguments", plan.ArgumentNames)
 	if plan.CPUs != nil {
-		fmt.Fprintf(&out, "CPUs: %d\n", *plan.CPUs)
+		if plan.CPUsRedacted {
+			fmt.Fprintln(&out, "CPUs: <redacted>")
+		} else {
+			fmt.Fprintf(&out, "CPUs: %d\n", *plan.CPUs)
+		}
 	}
 	if plan.Memory != "" {
-		fmt.Fprintf(&out, "Memory: %s\n", plan.Memory)
+		fmt.Fprintf(&out, "Memory: %s\n", displayPreviewValue(plan.Memory, plan.MemoryRedacted))
 	}
 	if _, err := fmt.Fprint(r.Out, out.String()); err != nil {
 		r.error(errors.New("write environment plan failed"))
@@ -88,6 +92,10 @@ func (r *Runner) environment(args []string) int {
 func writePortPreview(out *strings.Builder, ports []envfile.Port) {
 	fmt.Fprintf(out, "Ports: %d\n", len(ports))
 	for _, port := range ports {
+		if port.Redacted {
+			fmt.Fprintln(out, "  <redacted>")
+			continue
+		}
 		host := "ephemeral"
 		if port.Host != nil {
 			host = fmt.Sprintf("%d", *port.Host)
@@ -119,6 +127,7 @@ func applyEnvironmentName(plan *envfile.Plan, name string) error {
 		return err
 	}
 	plan.Name = name
+	plan.NameRedacted = false
 	return nil
 }
 
@@ -142,6 +151,20 @@ func displayValue(value string) string {
 		return "(unset)"
 	}
 	return value
+}
+
+func displayPreviewValue(value string, redacted bool) string {
+	if redacted {
+		return "<redacted>"
+	}
+	return displayValue(value)
+}
+
+func displayPreviewPath(value string, redacted bool) string {
+	if redacted {
+		return "<redacted>"
+	}
+	return displayPath(value)
 }
 
 func displayPath(value string) string {
