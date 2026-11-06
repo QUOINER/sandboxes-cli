@@ -154,6 +154,24 @@ func TestLoadRejectsUnknownDirectoryReferences(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsExpandedDirectoryWithReferenceSyntaxInName(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "project-${{literal}}")
+	if err := os.Mkdir(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(projectDir, "sbxenv.yaml")
+	writeEnvFile(t, path, "schemaVersion: \"1\"\nagent: shell\nworkspace: \"${{ env.projectDir }}/src\"\n")
+
+	plan, err := Load([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(projectDir, "src"); plan.Workspace != want {
+		t.Fatalf("workspace = %q, want %q", plan.Workspace, want)
+	}
+}
+
 func TestLoadRejectsUnsupportedFieldsAndMalformedDocuments(t *testing.T) {
 	cases := map[string]string{
 		"unknown field":           "schemaVersion: \"1\"\nagent: shell\nsecretSource: host\n",

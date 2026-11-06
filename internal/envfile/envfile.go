@@ -451,6 +451,10 @@ func resolveWorkspace(filePath, path, projectDir string) (string, error) {
 }
 
 func expandDirectoryReferences(value, fileDir, projectDir string) (string, error) {
+	unexpanded := directoryReference.ReplaceAllString(value, "")
+	if strings.Contains(unexpanded, "${{") {
+		return "", errors.New("unsupported environment directory reference")
+	}
 	var expansionErr error
 	expanded := directoryReference.ReplaceAllStringFunc(value, func(reference string) string {
 		if expansionErr != nil {
@@ -473,9 +477,6 @@ func expandDirectoryReferences(value, fileDir, projectDir string) (string, error
 	})
 	if expansionErr != nil {
 		return "", expansionErr
-	}
-	if strings.Contains(expanded, "${{") {
-		return "", errors.New("unsupported environment directory reference")
 	}
 	return expanded, nil
 }
