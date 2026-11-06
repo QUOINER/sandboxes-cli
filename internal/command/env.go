@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/rheic/sandboxes-cli/internal/envfile"
@@ -11,7 +12,7 @@ import (
 
 func (r *Runner) environment(args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env plan [PATH...]\n\nCreate a static, read-only preview of explicit sbxenv.yaml files.\nNo sandbox is created or changed; environment values are never displayed.\nApply, create, run, exec, and rm are unsupported.\n")
+		_, _ = fmt.Fprint(r.Out, "Usage: rsbx env plan [PATH...]\n\nCreate a static, read-only preview from the current directory and optional user defaults, or from explicit sbxenv.yaml paths. Explicit paths skip user defaults.\nNo sandbox is created or changed; environment values are never displayed.\nApply, create, run, exec, and rm are unsupported.\n")
 		return 0
 	}
 	if args[0] != "plan" {
@@ -21,7 +22,7 @@ func (r *Runner) environment(args []string) int {
 	fs := flag.NewFlagSet("env plan", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	fs.Usage = func() {
-		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...]\n\nPATH may be an sbxenv.yaml file or a directory containing it. Multiple files merge in order.\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
+		_, _ = fmt.Fprint(fs.Output(), "Usage: rsbx env plan [PATH...]\n\nWithout PATH, read sbxenv.yaml from the current directory and merge optional ~/.sbxenv.yaml defaults first. Explicit file or directory paths merge in order and skip user defaults.\nThis is a static preview only; it does not apply changes or inspect daemon state.\n")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -29,7 +30,7 @@ func (r *Runner) environment(args []string) int {
 		}
 		return r.flagParseFailure("env plan", err)
 	}
-	plan, err := envfile.Load(fs.Args())
+	plan, err := loadEnvironmentPlan(fs.Args())
 	if err != nil {
 		_, _ = fmt.Fprintf(r.Err, "rsbx env plan: %s\n", err)
 		return 1
@@ -61,6 +62,21 @@ func (r *Runner) environment(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func loadEnvironmentPlan(paths []string) (envfile.Plan, error) {
+	if len(paths) > 0 {
+		return envfile.Load(paths)
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return envfile.Plan{}, errors.New("resolve default environment paths")
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return envfile.Plan{}, errors.New("resolve default environment paths")
+	}
+	return envfile.LoadDefault(homeDir, workingDir)
 }
 
 func displayValue(value string) string {

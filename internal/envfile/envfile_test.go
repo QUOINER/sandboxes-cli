@@ -39,6 +39,58 @@ func TestLoadMergesFilesAndDiscardsEnvironmentValues(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultMergesUserDefaultsBeforeCurrentDirectory(t *testing.T) {
+	root := t.TempDir()
+	homeDir := filepath.Join(root, "home")
+	workingDir := filepath.Join(root, "project")
+	if err := os.Mkdir(homeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(workingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeEnvFile(t, filepath.Join(homeDir, ".sbxenv.yaml"), "schemaVersion: \"1\"\nagent: shell\nname: shared\nworkspace: shared-work\nenv:\n  SHARED: hidden\n")
+	writeEnvFile(t, filepath.Join(workingDir, "sbxenv.yaml"), "schemaVersion: \"1\"\nagent: shell\nname: project\nworkspace: project-work\nenv:\n  PROJECT: hidden\n")
+
+	plan, err := LoadDefault(homeDir, workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Name != "project" || plan.Workspace != filepath.Join(workingDir, "project-work") {
+		t.Fatalf("project values did not override defaults: %#v", plan)
+	}
+	if !reflect.DeepEqual(plan.EnvironmentKeys, []string{"PROJECT", "SHARED"}) {
+		t.Fatalf("merged environment keys = %#v", plan.EnvironmentKeys)
+	}
+
+	explicit, err := Load([]string{workingDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(explicit.EnvironmentKeys, []string{"PROJECT"}) {
+		t.Fatalf("explicit path unexpectedly included user defaults: %#v", explicit.EnvironmentKeys)
+	}
+}
+
+func TestLoadDefaultAllowsMissingUserDefaultsButRequiresProjectFile(t *testing.T) {
+	root := t.TempDir()
+	homeDir := filepath.Join(root, "home")
+	workingDir := filepath.Join(root, "project")
+	if err := os.Mkdir(homeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(workingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeEnvFile(t, filepath.Join(workingDir, "sbxenv.yaml"), "schemaVersion: \"1\"\nagent: shell\n")
+	if _, err := LoadDefault(homeDir, workingDir); err != nil {
+		t.Fatalf("missing optional home defaults rejected: %v", err)
+	}
+	if _, err := LoadDefault(homeDir, root); err == nil {
+		t.Fatal("missing working-directory environment file accepted")
+	}
+}
+
 func TestLoadRejectsUnsupportedFieldsAndMalformedDocuments(t *testing.T) {
 	cases := map[string]string{
 		"unknown field":           "schemaVersion: \"1\"\nagent: shell\nsecretSource: host\n",

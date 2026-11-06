@@ -59,3 +59,58 @@ func TestEnvironmentMutatingCommandsFailClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironmentPlanDefaultsAndExplicitPathPrecedence(t *testing.T) {
+	root := t.TempDir()
+	homeDir := filepath.Join(root, "home")
+	workingDir := filepath.Join(root, "project")
+	if err := os.Mkdir(homeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(workingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	homeFile := filepath.Join(homeDir, ".sbxenv.yaml")
+	projectFile := filepath.Join(workingDir, "sbxenv.yaml")
+	if err := os.WriteFile(homeFile, []byte("schemaVersion: \"1\"\nagent: shell\nenv:\n  HOME_DEFAULT: private\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectFile, []byte("schemaVersion: \"1\"\nagent: shell\nenv:\n  PROJECT_VALUE: visible\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workingDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	run := func(args ...string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		runner := NewRunner(&stdout, &stderr)
+		if code := runner.Run(context.Background(), args); code != 0 {
+			t.Fatalf("args %v: exit code %d, stderr: %s", args, code, stderr.String())
+		}
+		return stdout.String()
+	}
+	defaultOutput := run("env", "plan")
+	if !strings.Contains(defaultOutput, "HOME_DEFAULT=<redacted>") || !strings.Contains(defaultOutput, "PROJECT_VALUE=<redacted>") {
+		t.Fatalf("default precedence output = %q", defaultOutput)
+	}
+	if strings.Contains(defaultOutput, "private") || strings.Contains(defaultOutput, "visible") {
+		t.Fatalf("environment values leaked: %q", defaultOutput)
+	}
+	explicitOutput := run("env", "plan", projectFile)
+	if strings.Contains(explicitOutput, "HOME_DEFAULT") || !strings.Contains(explicitOutput, "PROJECT_VALUE=<redacted>") {
+		t.Fatalf("explicit path did not skip home defaults: %q", explicitOutput)
+	}
+}

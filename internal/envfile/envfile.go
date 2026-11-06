@@ -125,6 +125,27 @@ func Load(paths []string) (Plan, error) {
 	return plan, nil
 }
 
+// LoadDefault resolves the current-directory environment with optional
+// user-level defaults. Explicit paths should use Load so home defaults are
+// skipped, matching the sbx env command contract.
+func LoadDefault(homeDir, workingDir string) (Plan, error) {
+	if strings.TrimSpace(homeDir) == "" || strings.TrimSpace(workingDir) == "" {
+		return Plan{}, errors.New("resolve default environment paths")
+	}
+	paths := make([]string, 0, 2)
+	homeFile := filepath.Join(homeDir, ".sbxenv.yaml")
+	if info, err := os.Stat(homeFile); err == nil {
+		if !info.Mode().IsRegular() {
+			return Plan{}, errors.New("user environment defaults are not a regular file")
+		}
+		paths = append(paths, homeFile)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Plan{}, errors.New("inspect user environment defaults")
+	}
+	paths = append(paths, workingDir)
+	return Load(paths)
+}
+
 func mergeDocument(plan Plan, doc document, filePath string) (Plan, error) {
 	if doc.Name != "" {
 		plan.Name = doc.Name
