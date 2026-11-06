@@ -155,7 +155,7 @@ func moveKitInspectFlags(args []string) []string {
 			continue
 		}
 		flags = append(flags, arg)
-		if arg == "--format" || arg == "-format" {
+		if arg == formatFlag || arg == "-format" {
 			if i+1 < len(args) {
 				i++
 				flags = append(flags, args[i])

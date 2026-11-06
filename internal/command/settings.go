@@ -19,20 +19,19 @@ import (
 
 const settingsUsage = `Usage: rsbx settings COMMAND
 
-View and manage local Rheic settings in ~/.config/rheic/settings.toml.
+View and manage host settings in ~/.config/rheic/settings.toml. The catalog
+lists the pinned Docker Sandboxes matrix; Rheic consumes the documented
+local subset and stores the rest as validated overrides.
 
 Commands:
-  ls [--format table|json|yaml]   list settings and their effective source
-  get KEY                         print one value
-  set KEY VALUE                   set an override
+  ls [--format table|json|yaml]   list the full catalog and effective source
+  get KEY [--json]                print one value or its full record
+  set KEY VALUE                   set an override (type-validated)
   unset KEY                       remove an override
 
-Keys:
-  dns.upstream                    DNS upstream (host:port or https:// URL); restart required
-  policy.profile                  default policy profile: deny-all, balanced, sbx-compat
-  defaults.cpus                   CPU count for new sandboxes (0 = host-derived)
-  defaults.memory_mib             memory in MiB for new sandboxes (0 = host-derived)
-  sandbox.disk.dockerVolume       ext4 Docker volume size such as 10g (minimum 512m)
+Local runtime keys: dns.upstream (restart required), policy.profile,
+defaults.cpus, defaults.memory_mib, sandbox.disk.dockerVolume.
+Unknown keys are rejected.
 `
 
 type settingOutput struct {
@@ -40,6 +39,7 @@ type settingOutput struct {
 	Value       string `json:"value" yaml:"value"`
 	Type        string `json:"type" yaml:"type"`
 	Source      string `json:"source" yaml:"source"`
+	Default     string `json:"default" yaml:"default"`
 	Restart     bool   `json:"restart" yaml:"restart"`
 	Description string `json:"description" yaml:"description"`
 }
@@ -139,24 +139,43 @@ func boolMarker(value bool) string {
 	return ""
 }
 
+// settingRows lists the full catalog: the pinned Docker matrix plus Rheic
+// extensions, each with its override (file) or built-in default evaluated.
 func settingRows(values settings.Values) []settingOutput {
-	return []settingOutput{
-		settingRow("dns.upstream", values.DNSUpstream, values.DNSUpstream != "", "string", true, "DNS upstream used by sandbox gateways"),
-		settingRow("policy.profile", values.DefaultPolicyProfile, values.DefaultPolicyProfile != "", "string", false, "Default network policy profile for new sandboxes"),
-		settingRow("defaults.cpus", uintString(values.DefaultCPUs), values.DefaultCPUs != 0, "int", false, "CPU count for new sandboxes (0 = host-derived)"),
-		settingRow("defaults.memory_mib", uintString(values.DefaultMemoryMiB), values.DefaultMemoryMiB != 0, "int", false, "Memory in MiB for new sandboxes (0 = host-derived)"),
-		settingRow("sandbox.disk.dockerVolume", values.DockerVolumeSize, values.DockerVolumeSize != "", "string", false, "ext4 Docker volume size for new sandboxes"),
+	rows := make([]settingOutput, 0, 53)
+	for _, entry := range settings.Catalog() {
+		value, overridden := settingValue(values, entry)
+		rows = append(rows, settingRow(entry, value, overridden))
 	}
+	return rows
 }
 
-func settingRow(key, value string, set bool, kind string, restart bool, description string) settingOutput {
+func settingValue(values settings.Values, entry settings.Entry) (string, bool) {
+	switch entry.Key {
+	case "dns.upstream":
+		return values.DNSUpstream, values.DNSUpstream != ""
+	case "policy.profile":
+		return values.DefaultPolicyProfile, values.DefaultPolicyProfile != ""
+	case "defaults.cpus":
+		return uintString(values.DefaultCPUs), values.DefaultCPUs != 0
+	case "defaults.memory_mib":
+		return uintString(values.DefaultMemoryMiB), values.DefaultMemoryMiB != 0
+	case "sandbox.disk.dockerVolume":
+		return values.DockerVolumeSize, values.DockerVolumeSize != ""
+	}
+	value, ok := values.Extra[entry.Key]
+	return value, ok
+}
+
+func settingRow(entry settings.Entry, value string, overridden bool) settingOutput {
 	source := "default"
-	if set {
+	if overridden {
 		source = "file"
 	} else {
-		value = ""
+		value = entry.Default
 	}
-	return settingOutput{Key: key, Value: value, Type: kind, Source: source, Restart: restart, Description: description}
+	return settingOutput{Key: entry.Key, Value: value, Type: entry.Type, Source: source,
+		Default: entry.Default, Restart: entry.Restart, Description: entry.Description}
 }
 
 func uintString(value uint32) string {
@@ -167,8 +186,19 @@ func uintString(value uint32) string {
 }
 
 func (r *Runner) settingsGet(args []string) int {
-	if len(args) != 1 {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings get KEY")
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
+	fs := flag.NewFlagSet("settings get", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonOutput := fs.Bool("json", false, "print the full setting record")
+	format := fs.String("format", "", "output format: table, json or yaml")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return r.flagParseFailure("settings get", err)
+	}
+	if fs.NArg() != 1 {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx settings get KEY [--json]")
 		return 2
 	}
 	values, err := settings.Load(r.settingsPath())
@@ -176,12 +206,42 @@ func (r *Runner) settingsGet(args []string) int {
 		r.error(err)
 		return 1
 	}
-	row, found := findSettingRow(settingRows(values), args[0])
+	row, found := findSettingRow(settingRows(values), fs.Arg(0))
 	if !found {
-		r.error(fmt.Errorf("unknown setting %q", args[0]))
+		r.error(fmt.Errorf("unknown setting %q", fs.Arg(0)))
 		return 2
 	}
-	_, _ = fmt.Fprintln(r.Out, row.Value)
+	if *jsonOutput {
+		return r.printSettingRecord(row, listFormatJSON)
+	}
+	if *format == "" {
+		_, _ = fmt.Fprintln(r.Out, row.Value)
+		return 0
+	}
+	selected, err := resolveOperationFormat(*format, false)
+	if err != nil {
+		r.error(err)
+		return 2
+	}
+	return r.printSettingRecord(row, selected)
+}
+
+func (r *Runner) printSettingRecord(row settingOutput, selected string) int {
+	if selected == listFormatYAML {
+		data, err := yaml.Marshal(row)
+		if err != nil {
+			r.error(err)
+			return 1
+		}
+		_, _ = r.Out.Write(data)
+		return 0
+	}
+	encoder := json.NewEncoder(r.Out)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(row); err != nil {
+		r.error(err)
+		return 1
+	}
 	return 0
 }
 
@@ -233,7 +293,8 @@ func (r *Runner) settingsUnset(args []string) int {
 }
 
 func settingRestart(key string) bool {
-	return key == "dns.upstream"
+	entry, found := settings.Find(key)
+	return found && entry.Restart
 }
 
 func findSettingRow(rows []settingOutput, key string) (settingOutput, bool) {
@@ -246,11 +307,33 @@ func findSettingRow(rows []settingOutput, key string) (settingOutput, bool) {
 }
 
 func applySetting(values *settings.Values, key, value string) error {
+	if handled, err := applyTypedSetting(values, key, value); handled {
+		return err
+	}
+	entry, found := settings.Find(key)
+	if !found {
+		return fmt.Errorf("unknown setting %q", key)
+	}
+	if err := settings.ValidateValue(entry, value); err != nil {
+		return err
+	}
+	if values.Extra == nil {
+		values.Extra = map[string]string{}
+	}
+	if value == "" {
+		delete(values.Extra, key)
+	} else {
+		values.Extra[key] = value
+	}
+	return nil
+}
+
+func applyTypedSetting(values *settings.Values, key, value string) (bool, error) {
 	switch key {
 	case "dns.upstream":
 		value = strings.TrimSpace(value)
 		if err := validateDNSUpstream(value); err != nil {
-			return err
+			return true, err
 		}
 		values.DNSUpstream = value
 	case "policy.profile":
@@ -258,29 +341,29 @@ func applySetting(values *settings.Values, key, value string) error {
 		case "", "deny-all", "balanced", "sbx-compat":
 			values.DefaultPolicyProfile = value
 		default:
-			return errors.New("policy.profile must be deny-all, balanced or sbx-compat")
+			return true, errors.New("policy.profile must be deny-all, balanced or sbx-compat")
 		}
 	case "defaults.cpus":
 		parsed, err := parseSettingUint(value, 0, 64)
 		if err != nil {
-			return fmt.Errorf("defaults.cpus: %w", err)
+			return true, fmt.Errorf("defaults.cpus: %w", err)
 		}
 		values.DefaultCPUs = uint32(parsed) //nolint:gosec // parseSettingUint bounds the value to 64.
 	case "defaults.memory_mib":
 		parsed, err := parseSettingUint(value, 0, 32768)
 		if err != nil {
-			return fmt.Errorf("defaults.memory_mib: %w", err)
+			return true, fmt.Errorf("defaults.memory_mib: %w", err)
 		}
 		values.DefaultMemoryMiB = uint32(parsed) //nolint:gosec // parseSettingUint bounds the value to 32768.
 	case "sandbox.disk.dockerVolume":
 		if value != "" && !validVolumeSize(value) {
-			return errors.New("sandbox.disk.dockerVolume must be a size such as 10g or 512m (minimum 512 MiB)")
+			return true, errors.New("sandbox.disk.dockerVolume must be a size such as 10g or 512m (minimum 512 MiB)")
 		}
 		values.DockerVolumeSize = value
 	default:
-		return fmt.Errorf("unknown setting %q", key)
+		return false, nil
 	}
-	return nil
+	return true, nil
 }
 
 func parseSettingUint(value string, minValue, maxValue uint64) (uint64, error) {

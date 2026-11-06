@@ -3,6 +3,7 @@ package settings
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,13 +14,24 @@ import (
 	"strings"
 )
 
-// Values are the supported user overrides.
+// Setting value types used by the catalog.
+const (
+	TypeBool   = "bool"
+	TypeInt    = "int"
+	TypeString = "string"
+	TypeJSON   = "json"
+)
+
+// Values are the supported user overrides. Docker-matrix keys that the local
+// runtime does not consume yet are stored verbatim in Extra so they survive
+// round trips and report their evaluated source.
 type Values struct {
 	DNSUpstream          string
 	DefaultPolicyProfile string
 	DefaultCPUs          uint32
 	DefaultMemoryMiB     uint32
 	DockerVolumeSize     string
+	Extra                map[string]string
 }
 
 // DefaultPath returns ~/.config/rheic/settings.toml, honoring XDG_CONFIG_HOME.
@@ -80,31 +92,46 @@ func parse(r io.Reader, values *Values) error {
 		if err != nil {
 			return fmt.Errorf("settings line %d: %w", lineNumber, err)
 		}
-		switch key {
-		case "dns_upstream":
-			values.DNSUpstream = value
-		case "default_policy_profile":
-			values.DefaultPolicyProfile = value
-		case "default_cpus":
-			parsed, err := parseUint(key, value, 32)
-			if err != nil {
-				return err
-			}
-			values.DefaultCPUs = uint32(parsed) //nolint:gosec // parsed with 32 bits and validated below.
-		case "default_memory_mib":
-			parsed, err := parseUint(key, value, 32)
-			if err != nil {
-				return err
-			}
-			values.DefaultMemoryMiB = uint32(parsed) //nolint:gosec // parsed with 32 bits and validated below.
-		case "docker_volume_size":
-			values.DockerVolumeSize = value
-		default:
-			return fmt.Errorf("settings line %d: unknown key %q", lineNumber, key)
+		if err := applyParsedPair(values, key, value); err != nil {
+			return fmt.Errorf("settings line %d: %w", lineNumber, err)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read settings: %w", err)
+	}
+	return nil
+}
+
+// applyParsedPair routes one parsed key/value pair into the typed fields or
+// the Extra overrides.
+func applyParsedPair(values *Values, key, value string) error {
+	switch key {
+	case "dns_upstream", "dns.upstream":
+		values.DNSUpstream = value
+	case "default_policy_profile", "policy.profile":
+		values.DefaultPolicyProfile = value
+	case "default_cpus", "defaults.cpus":
+		parsed, err := parseUint(key, value, 32)
+		if err != nil {
+			return err
+		}
+		values.DefaultCPUs = uint32(parsed) //nolint:gosec // parsed with 32 bits and validated below.
+	case "default_memory_mib", "defaults.memory_mib":
+		parsed, err := parseUint(key, value, 32)
+		if err != nil {
+			return err
+		}
+		values.DefaultMemoryMiB = uint32(parsed) //nolint:gosec // parsed with 32 bits and validated below.
+	case "docker_volume_size", "sandbox.disk.dockerVolume":
+		values.DockerVolumeSize = value
+	default:
+		if _, found := Find(key); !found {
+			return fmt.Errorf("unknown key %q", key)
+		}
+		if values.Extra == nil {
+			values.Extra = map[string]string{}
+		}
+		values.Extra[key] = value
 	}
 	return nil
 }
@@ -123,6 +150,30 @@ func parseValue(raw string) (string, error) {
 	return value, nil
 }
 
+func settingsEntries(values Values) []string {
+	entries := make([]string, 0, 8+len(values.Extra))
+	if values.DNSUpstream != "" {
+		entries = append(entries, "dns_upstream = "+strconv.Quote(values.DNSUpstream))
+	}
+	if values.DefaultPolicyProfile != "" {
+		entries = append(entries, "default_policy_profile = "+strconv.Quote(values.DefaultPolicyProfile))
+	}
+	if values.DefaultCPUs != 0 {
+		entries = append(entries, "default_cpus = "+strconv.FormatUint(uint64(values.DefaultCPUs), 10))
+	}
+	if values.DefaultMemoryMiB != 0 {
+		entries = append(entries, "default_memory_mib = "+strconv.FormatUint(uint64(values.DefaultMemoryMiB), 10))
+	}
+	if values.DockerVolumeSize != "" {
+		entries = append(entries, "docker_volume_size = "+strconv.Quote(values.DockerVolumeSize))
+	}
+	for key, value := range values.Extra {
+		entries = append(entries, key+" = "+strconv.Quote(value))
+	}
+	sort.Strings(entries)
+	return entries
+}
+
 func parseUint(key, value string, bits int) (uint64, error) {
 	parsed, err := strconv.ParseUint(value, 10, bits)
 	if err != nil {
@@ -139,25 +190,8 @@ func Save(path string, values Values) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create settings directory: %w", err)
 	}
-	entries := make([]string, 0, 5)
-	if values.DNSUpstream != "" {
-		entries = append(entries, "dns_upstream = "+strconv.Quote(values.DNSUpstream))
-	}
-	if values.DefaultPolicyProfile != "" {
-		entries = append(entries, "default_policy_profile = "+strconv.Quote(values.DefaultPolicyProfile))
-	}
-	if values.DefaultCPUs != 0 {
-		entries = append(entries, "default_cpus = "+strconv.FormatUint(uint64(values.DefaultCPUs), 10))
-	}
-	if values.DefaultMemoryMiB != 0 {
-		entries = append(entries, "default_memory_mib = "+strconv.FormatUint(uint64(values.DefaultMemoryMiB), 10))
-	}
-	if values.DockerVolumeSize != "" {
-		entries = append(entries, "docker_volume_size = "+strconv.Quote(values.DockerVolumeSize))
-	}
-	sort.Strings(entries)
 	body := "# Rheic host settings. Managed by rsbx settings; do not put secrets here.\n"
-	if len(entries) > 0 {
+	if entries := settingsEntries(values); len(entries) > 0 {
 		body += strings.Join(entries, "\n") + "\n"
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".settings-*")
@@ -183,6 +217,35 @@ func Save(path string, values Values) error {
 	}
 	if err := os.Rename(tempName, path); err != nil {
 		return fmt.Errorf("replace settings: %w", err)
+	}
+	return nil
+}
+
+// ValidateValue checks value against the entry's declared type. An empty
+// value means "remove the override" and is always valid.
+func ValidateValue(entry Entry, value string) error {
+	if value == "" {
+		return nil
+	}
+	switch entry.Type {
+	case TypeBool:
+		//nolint:goconst // the string also appears in generated catalog defaults.
+		if value != "true" && value != "false" {
+			return fmt.Errorf("%s must be true or false", entry.Key)
+		}
+	case TypeInt:
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 0 {
+			return fmt.Errorf("%s must be a non-negative integer", entry.Key)
+		}
+		if entry.Key == "daemon.log.maxAgeDays" && parsed > 3650 {
+			return errors.New("daemon.log.maxAgeDays must be at most 3650")
+		}
+	case TypeJSON:
+		var decoded any
+		if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+			return fmt.Errorf("%s must be valid JSON: %w", entry.Key, err)
+		}
 	}
 	return nil
 }

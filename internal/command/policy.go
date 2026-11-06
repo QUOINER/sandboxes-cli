@@ -356,7 +356,7 @@ func evaluatePolicyTarget(allow, deny []sdk.NetworkRule, protocol string, ip net
 }
 
 func (r *Runner) policyList(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--format": true})
+	args = reorderFlagArgs(args, map[string]bool{formatFlag: true})
 	fs := flag.NewFlagSet("policy ls", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	format := fs.String("format", listFormatTable, "output format: table, json or yaml")

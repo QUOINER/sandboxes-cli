@@ -18,7 +18,8 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(path)
-	if err != nil || got != want {
+	if err != nil || got.DNSUpstream != want.DNSUpstream || got.DefaultPolicyProfile != want.DefaultPolicyProfile ||
+		got.DefaultCPUs != want.DefaultCPUs || got.DefaultMemoryMiB != want.DefaultMemoryMiB || got.DockerVolumeSize != want.DockerVolumeSize {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 	info, err := os.Stat(path)
@@ -51,4 +52,66 @@ func TestLoadRejectsUnknownAndUnsafe(t *testing.T) {
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "not writable") {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+func TestCatalogCoversDockerMatrixAndValidatesTypes(t *testing.T) {
+	if got := len(Catalog()); got != 53 {
+		t.Fatalf("catalog entries = %d, want 53 (49 Docker keys + 4 Rheic extensions)", got)
+	}
+	entry, found := Find("proxy.daemon")
+	if !found || entry.Type != "string" || !entry.Restart {
+		t.Fatalf("proxy.daemon entry = %+v found=%v", entry, found)
+	}
+	entry, found = Find("kit.allowedSources")
+	if !found || entry.Type != "json" || entry.Default != `["docker.io/"]` {
+		t.Fatalf("kit.allowedSources entry = %+v found=%v", entry, found)
+	}
+	if err := ValidateValue(entry, `["registry.example/"]`); err != nil {
+		t.Fatalf("valid JSON rejected: %v", err)
+	}
+	if err := ValidateValue(entry, "not json"); err == nil {
+		t.Fatal("invalid JSON accepted")
+	}
+	if err := ValidateValue(FindEntry(t, "ssh.autoCreate"), "true"); err != nil {
+		t.Fatalf("valid bool rejected: %v", err)
+	}
+	if err := ValidateValue(FindEntry(t, "ssh.autoCreate"), "yes"); err == nil {
+		t.Fatal("invalid bool accepted")
+	}
+	if err := ValidateValue(FindEntry(t, "daemon.log.maxAgeDays"), "4000"); err == nil {
+		t.Fatal("maxAgeDays above 3650 accepted")
+	}
+	if err := ValidateValue(FindEntry(t, "daemon.log.maxSizeMB"), "100"); err != nil {
+		t.Fatalf("valid int rejected: %v", err)
+	}
+	if _, found := Find("no.such.key"); found {
+		t.Fatal("unknown key found in catalog")
+	}
+}
+
+func TestExtraOverridesRoundTrip(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ACL validation is not implemented; Load remains fail closed")
+	}
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	values := Values{Extra: map[string]string{"proxy.daemon": "http://proxy.example:3128", "kit.requireSignature": "true"}}
+	if err := Save(path, values); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Extra["proxy.daemon"] != "http://proxy.example:3128" || got.Extra["kit.requireSignature"] != "true" {
+		t.Fatalf("extra=%+v", got.Extra)
+	}
+}
+
+func FindEntry(t *testing.T, key string) Entry {
+	t.Helper()
+	entry, found := Find(key)
+	if !found {
+		t.Fatalf("key %q not in catalog", key)
+	}
+	return entry
 }
