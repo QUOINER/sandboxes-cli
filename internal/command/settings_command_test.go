@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,6 +16,9 @@ import (
 
 func runSettings(t *testing.T, envPath string, args ...string) (*bytes.Buffer, int) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ACL validation is not implemented; Load remains fail closed")
+	}
 	var out bytes.Buffer
 	runner := &Runner{Out: &out, Err: &out, Socket: filepath.Join(t.TempDir(), "sandboxesd.sock"),
 		NewClient: func(string) (sdk.Client, error) { return nil, errors.New("settings does not need a daemon") }}

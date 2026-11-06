@@ -23,6 +23,7 @@ func checkDiskSpace(stateDir string) diagnoseCheck {
 		check.Detail = "cannot stat state directory: " + err.Error()
 		return check
 	}
+	//nolint:gosec // statfs block size is always positive.
 	freeBytes := stat.Bavail * uint64(stat.Bsize)
 	check.Status = diagnosePass
 	check.Detail = formatGiB(freeBytes) + " free on the state directory's volume"
