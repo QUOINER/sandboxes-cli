@@ -140,7 +140,7 @@ func TestDiagnoseUsesInjectableProcessCount(t *testing.T) {
 }
 
 func TestDiagnoseStateDirDerivesFromSocket(t *testing.T) {
-	if dir := diagnoseStateDir(filepath.Join("state", "run", "sandboxesd.sock")); dir != filepath.Join("state", "run") {
+	if dir := diagnoseStateDir(filepath.Join("state", "sandboxesd.sock")); dir != "state" {
 		t.Fatalf("state dir = %q", dir)
 	}
 	if dir := diagnoseStateDir(""); !strings.HasSuffix(dir, ".sandboxes") {

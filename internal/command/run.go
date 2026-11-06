@@ -98,6 +98,7 @@ Examples:
 	removeFlag        = "--rm"
 
 	formatFlag        = "--format"
+	limitFlag         = "--limit"
 	jsonFlag          = "--json"
 	workdirFlag       = "--workdir"
 	forceFlag         = "--force"
