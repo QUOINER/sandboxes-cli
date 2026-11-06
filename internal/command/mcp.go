@@ -134,10 +134,10 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 	directory := fs.String("dir", "", "working directory")
 	fs.Var(&serverArgs, "args", "comma-separated MCP executable arguments (repeatable)")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "Usage: rsbx mcp add NAME --command EXECUTABLE [--args ARG] [--dir PATH]")
+		_, _ = fmt.Fprintf(fs.Output(), "Usage: rsbx mcp add NAME %s EXECUTABLE [--args ARG] [--dir PATH]\n", commandFlag)
 		_, _ = fmt.Fprintln(fs.Output(), "Runs the registered stdio server on the host after daemon approval. Command arguments are stored as local metadata; do not put secrets in them.")
 	}
-	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{"--command": true, "--dir": true, "--args": true})); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{commandFlag: true, "--dir": true, mcpArgsFlagName: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
@@ -224,12 +224,12 @@ func (r *Runner) mcpCall(ctx context.Context, args []string) int {
 	var raw string
 	fs := flag.NewFlagSet("mcp call", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
-	fs.StringVar(&raw, "args", "{}", "JSON object passed to the tool")
+	fs.StringVar(&raw, strings.TrimPrefix(mcpArgsFlagName, "--"), "{}", "JSON object passed to the tool")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintln(fs.Output(), "Usage: rsbx mcp call SANDBOX SERVER TOOL [--args JSON]")
 		_, _ = fmt.Fprintln(fs.Output(), "Requests daemon-trusted approval before invoking the host MCP server. Argument values are hidden in the prompt; do not pass secrets.")
 	}
-	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{"--args": true})); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{mcpArgsFlagName: true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}

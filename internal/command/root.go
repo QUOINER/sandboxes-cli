@@ -211,7 +211,7 @@ func (r *Runner) runAuxiliaryCommand(ctx context.Context, name string, args []st
 		return r.agents(args), true
 	case "env":
 		return r.environment(args), true
-	case "mcp":
+	case mcpCommand:
 		return r.mcp(ctx, args), true
 	case commandReset:
 		return r.reset(ctx, args), true
@@ -878,7 +878,6 @@ func reorderFlagArgs(args []string, valueFlags map[string]bool) []string {
 func (r *Runner) unsupportedFamily(name string) int {
 	reasons := map[string]string{
 		"volume": "persistent volumes are cloud-only in this build",
-		"mcp":    "the MCP gateway is not implemented",
 		"move":   "cloud move is unavailable without a tenant",
 		"ttl":    "cloud TTL is unavailable without a tenant",
 		"setup":  "host setup is not implemented",

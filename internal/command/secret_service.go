@@ -43,7 +43,7 @@ type serviceSecretOutput struct {
 }
 
 func (r *Runner) serviceSecretSet(ctx context.Context, args []string) int {
-	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "-t": true, "--ref": true, "--command": true, "--refresh": true, forceFlag: false, "-f": false, oauthFlag: false, "--no-verify": false, "--show-error": false})
+	args = reorderFlagArgs(args, map[string]bool{"--sandbox": true, "--token": true, "-t": true, "--ref": true, commandFlag: true, "--refresh": true, forceFlag: false, "-f": false, oauthFlag: false, "--no-verify": false, "--show-error": false})
 	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	sandboxName := fs.String("sandbox", "", "scope the secret to one sandbox")

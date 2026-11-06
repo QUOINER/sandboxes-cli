@@ -13,7 +13,7 @@ var completionTree = map[string][]string{
 	"create":          {nameFlag, "--workspace", publishShort, publishFlag, allowFlag, denyFlag, templateShort, templateFlag, imageFlag, cpusFlag, memoryFlag, "--idempotency-key", envShort, envFlag, envFileFlag},
 	"exec":            {"-i", "--interactive", "-t", "--tty", "-w", workdirFlag, envShort, envFlag, envFileFlag, "-u", userFlag},
 	"cp":              {"-L", "--follow-link"},
-	"ls":              {formatFlag, jsonFlag, "-q", "--quiet", limitFlag},
+	"ls":              {formatFlag, jsonFlag, "-q", quietLongFlag, limitFlag},
 	commandGet:        {},
 	"ports":           {formatFlag, jsonFlag, publishFlag, "--unpublish"},
 	policyCommand:     {formatFlag, jsonFlag, sandboxFlag},
@@ -25,7 +25,8 @@ var completionTree = map[string][]string{
 	"wait":            {},
 	"login":           {usernameFlag, "--password-stdin"},
 	"logout":          {"-f", forceFlag},
-	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", "--command", globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
+	secretCommand:     {registryFlag, usernameFlag, "--password-stdin", "--all-sandboxes", "--all", "--dry-run", sandboxFlag, oauthFlag, "--token", "-t", forceFlag, "-f", "--ref", commandFlag, globalFlag, "-g", "--service", "--quiet", "-q", formatFlag, jsonFlag, helpFlag, helpShort},
+	mcpCommand:        {commandFlag, mcpArgsFlagName, "--dir", formatFlag, jsonFlag, quietLongFlag, forceFlag, helpFlag, helpShort},
 	"version":         {formatFlag, jsonFlag},
 	commandAgents:     {formatFlag, jsonFlag},
 	completionCommand: {},
@@ -37,6 +38,7 @@ var completionSubcommands = map[string][]string{
 	secretCommand:     {"import", "ls", commandList, commandSet, commandSetCustom, "rm", commandRemove, commandDelete, commandUnset},
 	completionCommand: {"bash", "zsh", "fish", "powershell"},
 	commandAgents:     {"ls", commandList},
+	mcpCommand:        {"ls", "add", "call", "rm"},
 }
 
 func completionCommands() []string {
