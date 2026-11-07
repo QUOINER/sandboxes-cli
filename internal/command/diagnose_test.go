@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+
+	"github.com/rheic/sandboxes-cli/internal/version"
 )
 
 type diagnoseVersionService struct{ err error }
@@ -19,7 +21,7 @@ func (s diagnoseVersionService) Get(context.Context) (sdk.VersionInfo, error) {
 	if s.err != nil {
 		return sdk.VersionInfo{}, s.err
 	}
-	return sdk.VersionInfo{Version: "0.0.35", APIVersion: "0.0.16"}, nil
+	return sdk.VersionInfo{Version: version.Version, APIVersion: "0.0.16"}, nil
 }
 
 type diagnoseSandbox struct {
