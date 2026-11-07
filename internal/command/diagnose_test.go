@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/rheic/sandboxes-cli/internal/version"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	sdk "github.com/rheic/sandboxes-go-sdk"
+
+	"github.com/rheic/sandboxes-cli/internal/version"
 )
 
 type diagnoseVersionService struct{ err error }
