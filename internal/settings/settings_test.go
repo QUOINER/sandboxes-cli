@@ -55,8 +55,8 @@ func TestLoadRejectsUnknownAndUnsafe(t *testing.T) {
 }
 
 func TestCatalogCoversDockerMatrixAndValidatesTypes(t *testing.T) {
-	if got := len(Catalog()); got != 53 {
-		t.Fatalf("catalog entries = %d, want 53 (49 Docker keys + 4 Rheic extensions)", got)
+	if got := len(Catalog()); got != 54 {
+		t.Fatalf("catalog entries = %d, want 54 (49 Docker keys + 5 Rheic extensions)", got)
 	}
 	entry, found := Find("proxy.daemon")
 	if !found || entry.Type != "string" || !entry.Restart {

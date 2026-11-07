@@ -26,12 +26,13 @@ const (
 // runtime does not consume yet are stored verbatim in Extra so they survive
 // round trips and report their evaluated source.
 type Values struct {
-	DNSUpstream          string
-	DefaultPolicyProfile string
-	DefaultCPUs          uint32
-	DefaultMemoryMiB     uint32
-	DockerVolumeSize     string
-	Extra                map[string]string
+	DNSUpstream           string
+	DefaultPolicyProfile  string
+	DefaultCPUs           uint32
+	DefaultMemoryMiB      uint32
+	DockerVolumeSize      string
+	MCPRemoteAllowedHosts string
+	Extra                 map[string]string
 }
 
 // DefaultPath returns ~/.config/rheic/settings.toml, honoring XDG_CONFIG_HOME.
@@ -124,6 +125,8 @@ func applyParsedPair(values *Values, key, value string) error {
 		values.DefaultMemoryMiB = uint32(parsed) //nolint:gosec // parsed with 32 bits and validated below.
 	case "docker_volume_size", "sandbox.disk.dockerVolume":
 		values.DockerVolumeSize = value
+	case "mcp_remote_allowed_hosts", "mcp.remote.allowedHosts":
+		values.MCPRemoteAllowedHosts = value
 	default:
 		if _, found := Find(key); !found {
 			return fmt.Errorf("unknown key %q", key)
@@ -166,6 +169,9 @@ func settingsEntries(values Values) []string {
 	}
 	if values.DockerVolumeSize != "" {
 		entries = append(entries, "docker_volume_size = "+strconv.Quote(values.DockerVolumeSize))
+	}
+	if values.MCPRemoteAllowedHosts != "" {
+		entries = append(entries, "mcp_remote_allowed_hosts = "+strconv.Quote(values.MCPRemoteAllowedHosts))
 	}
 	for key, value := range values.Extra {
 		entries = append(entries, key+" = "+strconv.Quote(value))

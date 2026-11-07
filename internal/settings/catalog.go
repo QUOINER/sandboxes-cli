@@ -70,6 +70,7 @@ var extensionKeys = []Entry{
 	{Key: "policy.profile", Type: "string", Description: "Default network policy profile for new sandboxes: deny-all, balanced, sbx-compat"},
 	{Key: "defaults.cpus", Type: "int", Description: "CPU count for new sandboxes (0 = host-derived)"},
 	{Key: "defaults.memory_mib", Type: "int", Description: "Memory in MiB for new sandboxes (0 = host-derived)"},
+	{Key: "mcp.remote.allowedHosts", Type: "string", Restart: true, Description: "Exact remote MCP DNS host allowlist (comma-separated); no wildcards or IP literals. Empty disables remote MCP."},
 }
 
 // Catalog returns every supported setting, Docker matrix first.

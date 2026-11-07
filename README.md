@@ -142,8 +142,10 @@ secrets in argv (prefer a bounded, permission-restricted env file).
 `rsbx attach [--shell] SANDBOX` starts a stopped sandbox and opens its agent
 session. `rsbx settings ls|get|set|unset` manages
 `~/.config/rheic/settings.toml` (`dns.upstream`, `policy.profile`,
-`defaults.cpus`, `defaults.memory_mib`, `sandbox.disk.dockerVolume`); DNS and
-daemon-owned consumers need a daemon restart. `rsbx secret` stores service API
+`defaults.cpus`, `defaults.memory_mib`, `sandbox.disk.dockerVolume`, and
+`mcp.remote.allowedHosts`). The remote MCP setting is a comma-separated exact
+DNS host allowlist (no wildcard or IP-literal entries); an empty value disables
+remote MCP. DNS and daemon-owned consumers need a daemon restart. `rsbx secret` stores service API
 keys and registry credentials in the host keychain. Service secret values are
 not written to SQLite, logs or argv. `${secret:service}` environment references
 are rejected because guest processes can read environment values. Migrate
