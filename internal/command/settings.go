@@ -17,7 +17,8 @@ import (
 	"github.com/rheic/sandboxes-cli/internal/settings"
 )
 
-const settingsUsage = `Usage: rsbx settings COMMAND
+const (
+	settingsUsage = `Usage: rsbx settings COMMAND
 
 View and manage host settings in ~/.config/rheic/settings.toml. The catalog
 lists the pinned Docker Sandboxes matrix; Rheic consumes the documented
@@ -30,9 +31,13 @@ Commands:
   unset KEY                       remove an override
 
 Local runtime keys: dns.upstream (restart required), policy.profile,
-defaults.cpus, defaults.memory_mib, sandbox.disk.dockerVolume.
+defaults.cpus, defaults.memory_mib, sandbox.disk.dockerVolume,
+mcp.remote.allowedHosts (restart required).
 Unknown keys are rejected.
 `
+	settingDockerVolume   = "sandbox.disk.dockerVolume"
+	settingMCPRemoteHosts = "mcp.remote.allowedHosts"
+)
 
 type settingOutput struct {
 	Key         string `json:"key" yaml:"key"`
@@ -142,7 +147,7 @@ func boolMarker(value bool) string {
 // settingRows lists the full catalog: the pinned Docker matrix plus Rheic
 // extensions, each with its override (file) or built-in default evaluated.
 func settingRows(values settings.Values) []settingOutput {
-	rows := make([]settingOutput, 0, 53)
+	rows := make([]settingOutput, 0, 54)
 	for _, entry := range settings.Catalog() {
 		value, overridden := settingValue(values, entry)
 		rows = append(rows, settingRow(entry, value, overridden))
@@ -160,8 +165,10 @@ func settingValue(values settings.Values, entry settings.Entry) (string, bool) {
 		return uintString(values.DefaultCPUs), values.DefaultCPUs != 0
 	case "defaults.memory_mib":
 		return uintString(values.DefaultMemoryMiB), values.DefaultMemoryMiB != 0
-	case "sandbox.disk.dockerVolume":
+	case settingDockerVolume:
 		return values.DockerVolumeSize, values.DockerVolumeSize != ""
+	case settingMCPRemoteHosts:
+		return values.MCPRemoteAllowedHosts, values.MCPRemoteAllowedHosts != ""
 	}
 	value, ok := values.Extra[entry.Key]
 	return value, ok
@@ -355,15 +362,46 @@ func applyTypedSetting(values *settings.Values, key, value string) (bool, error)
 			return true, fmt.Errorf("defaults.memory_mib: %w", err)
 		}
 		values.DefaultMemoryMiB = uint32(parsed) //nolint:gosec // parseSettingUint bounds the value to 32768.
-	case "sandbox.disk.dockerVolume":
-		if value != "" && !validVolumeSize(value) {
-			return true, errors.New("sandbox.disk.dockerVolume must be a size such as 10g or 512m (minimum 512 MiB)")
-		}
-		values.DockerVolumeSize = value
+	case settingDockerVolume, settingMCPRemoteHosts:
+		return applyStringSetting(values, key, value)
 	default:
 		return false, nil
 	}
 	return true, nil
+}
+
+func applyStringSetting(values *settings.Values, key, value string) (bool, error) {
+	switch key {
+	case settingDockerVolume:
+		if value != "" && !validVolumeSize(value) {
+			return true, errors.New("sandbox.disk.dockerVolume must be a size such as 10g or 512m (minimum 512 MiB)")
+		}
+		values.DockerVolumeSize = value
+	case settingMCPRemoteHosts:
+		if err := validateMCPRemoteHostList(value); err != nil {
+			return true, err
+		}
+		values.MCPRemoteAllowedHosts = value
+	}
+	return true, nil
+}
+
+func validateMCPRemoteHostList(value string) error {
+	if value == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(value, ",") {
+		host := strings.ToLower(strings.TrimSpace(item))
+		if host == "" || strings.Contains(host, "*") || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil || !validDNSHost(host) {
+			return errors.New("mcp.remote.allowedHosts must be comma-separated exact DNS hostnames (no wildcards or IP literals)")
+		}
+		if _, exists := seen[host]; exists {
+			return errors.New("mcp.remote.allowedHosts contains a duplicate hostname")
+		}
+		seen[host] = struct{}{}
+	}
+	return nil
 }
 
 func parseSettingUint(value string, minValue, maxValue uint64) (uint64, error) {

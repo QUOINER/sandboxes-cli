@@ -36,8 +36,8 @@ func TestSettingsListsFullCatalogWithDefaults(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
 		t.Fatalf("json: %v output=%q", err, out.String())
 	}
-	if len(rows) != 53 {
-		t.Fatalf("rows=%d, want 53", len(rows))
+	if len(rows) != 54 {
+		t.Fatalf("rows=%d, want 54", len(rows))
 	}
 	byKey := map[string]settingOutput{}
 	for _, row := range rows {
@@ -52,6 +52,9 @@ func TestSettingsListsFullCatalogWithDefaults(t *testing.T) {
 	if row := byKey["sandbox.disk.dockerVolume"]; row.Default != "10g" {
 		t.Fatalf("docker volume row = %+v", row)
 	}
+	if row := byKey["mcp.remote.allowedHosts"]; !row.Restart || row.Source != "default" {
+		t.Fatalf("remote MCP host allowlist row = %+v", row)
+	}
 }
 
 func TestSettingsSetValidatesCatalogTypesAndPersistsExtras(t *testing.T) {
@@ -64,6 +67,16 @@ func TestSettingsSetValidatesCatalogTypesAndPersistsExtras(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d output=%q", code, out.String())
 	}
+	out, code = runSettings(t, path, "set", "mcp.remote.allowedHosts", "mcp.example.com,api.example.com")
+	if code != 0 {
+		t.Fatalf("set MCP host allowlist exit=%d output=%q", code, out.String())
+	}
+	if _, code := runSettings(t, path, "set", "mcp.remote.allowedHosts", "*.example.com"); code == 0 {
+		t.Fatal("wildcard MCP host allowlist accepted")
+	}
+	if _, code := runSettings(t, path, "set", "mcp.remote.allowedHosts", "127.0.0.1"); code == 0 {
+		t.Fatal("IP-literal MCP host allowlist accepted")
+	}
 	if _, code := runSettings(t, path, "set", "ssh.autoCreate", "yes"); code == 0 {
 		t.Fatal("invalid bool accepted")
 	}
@@ -75,7 +88,7 @@ func TestSettingsSetValidatesCatalogTypesAndPersistsExtras(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `ssh.autoCreate = "true"`) || !strings.Contains(text, `kit.allowedSources = "[\"registry.example/\"]"`) {
+	if !strings.Contains(text, `ssh.autoCreate = "true"`) || !strings.Contains(text, `kit.allowedSources = "[\"registry.example/\"]"`) || !strings.Contains(text, `mcp_remote_allowed_hosts = "mcp.example.com,api.example.com"`) {
 		t.Fatalf("file=%q", text)
 	}
 	out, code = runSettings(t, path, "get", "ssh.autoCreate")
