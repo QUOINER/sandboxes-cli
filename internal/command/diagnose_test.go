@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/rheic/sandboxes-cli/internal/version"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func (s diagnoseVersionService) Get(context.Context) (sdk.VersionInfo, error) {
 	if s.err != nil {
 		return sdk.VersionInfo{}, s.err
 	}
-	return sdk.VersionInfo{Version: "0.0.35", APIVersion: "0.0.16"}, nil
+	return sdk.VersionInfo{Version: version.Version, APIVersion: "0.0.16"}, nil
 }
 
 type diagnoseSandbox struct {
