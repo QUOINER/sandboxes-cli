@@ -127,34 +127,32 @@ func writeMCPList(out io.Writer, servers []sdk.MCPServer, format string, jsonOut
 }
 
 func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
-	var serverArgs mcpArgsFlag
+	var serverArgs, headerArgs mcpArgsFlag
 	fs := flag.NewFlagSet("mcp add", flag.ContinueOnError)
 	fs.SetOutput(r.Err)
 	command := fs.String("command", "", "absolute or PATH-resolved local stdio executable")
 	directory := fs.String("dir", "", "working directory")
+	remoteURL := fs.String("url", "", "remote streamable-HTTPS MCP endpoint (mutually exclusive with --command)")
 	fs.Var(&serverArgs, "args", "comma-separated MCP executable arguments (repeatable)")
+	fs.Var(&headerArgs, "header", "static non-secret remote header as Name:Value (repeatable)")
 	fs.Usage = func() {
 		_, _ = fmt.Fprintf(fs.Output(), "Usage: rsbx mcp add NAME %s EXECUTABLE [--args ARG] [--dir PATH]\n", commandFlag)
-		_, _ = fmt.Fprintln(fs.Output(), "Runs the registered stdio server on the host after daemon approval. Command arguments are stored as local metadata; do not put secrets in them.")
+		_, _ = fmt.Fprintln(fs.Output(), "       rsbx mcp add NAME --url https://HOST/mcp [--header Name:Value]")
+		_, _ = fmt.Fprintln(fs.Output(), "Runs the registered stdio server on the host after daemon approval. Command arguments are stored as local metadata; do not put secrets in them. Remote servers are limited to the daemon's allowed hosts; secret headers are not accepted here.")
 	}
-	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{commandFlag: true, "--dir": true, mcpArgsFlagName: true})); err != nil {
+	if err := fs.Parse(reorderFlagArgs(args, map[string]bool{commandFlag: true, "--dir": true, mcpArgsFlagName: true, "--url": true, "--header": true})); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return r.flagParseFailure("mcp add", err)
 	}
-	if fs.NArg() != 1 || *command == "" {
-		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp add NAME --command EXECUTABLE [--args ARG] [--dir PATH]")
+	if fs.NArg() != 1 || (*command == "" && *remoteURL == "") || (*command != "" && *remoteURL != "") {
+		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp add NAME (--command EXECUTABLE [--args ARG] [--dir PATH] | --url https://HOST/mcp [--header Name:Value])")
 		return 2
 	}
 	if err := requireMCPApprovalTerminal(r.In); err != nil {
 		r.error(err)
 		return 1
-	}
-	resolved, resolvedDir, err := prepareMCPCommand(*command, *directory)
-	if err != nil {
-		r.error(err)
-		return 2
 	}
 	client, err := r.client()
 	if err != nil {
@@ -162,11 +160,61 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer func() { _ = client.Close() }()
+	if *remoteURL != "" {
+		headers, err := parseMCPHeaders(headerArgs)
+		if err != nil {
+			r.error(err)
+			return 2
+		}
+		if err := r.registerMCPRemoteServer(ctx, client, fs.Arg(0), *remoteURL, headers); err != nil {
+			r.error(err)
+			return 1
+		}
+		return 0
+	}
+	resolved, resolvedDir, err := prepareMCPCommand(*command, *directory)
+	if err != nil {
+		r.error(err)
+		return 2
+	}
 	if err := r.registerMCPServer(ctx, client, fs.Arg(0), resolved, serverArgs, resolvedDir); err != nil {
 		r.error(err)
 		return 1
 	}
 	return 0
+}
+
+// parseMCPHeaders parses repeatable Name:Value flags into a header map.
+func parseMCPHeaders(values []string) (map[string]string, error) {
+	headers := make(map[string]string, len(values))
+	for _, value := range values {
+		name, headerValue, ok := strings.Cut(value, ":")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("invalid MCP header %q, want Name:Value", value)
+		}
+		if strings.EqualFold(name, "authorization") || strings.EqualFold(name, "proxy-authorization") {
+			return nil, errors.New("secret MCP headers must come from the host credential broker, not the CLI")
+		}
+		if strings.ContainsAny(name, "\r\n") || strings.ContainsAny(headerValue, "\r\n") {
+			return nil, errors.New("MCP headers must not contain control characters")
+		}
+		headers[name] = strings.TrimSpace(headerValue)
+	}
+	return headers, nil
+}
+
+func (r *Runner) registerMCPRemoteServer(ctx context.Context, client sdk.Client, name, rawURL string, headers map[string]string) error {
+	service := sdk.MCP(client)
+	registration, err := service.Register(ctx, sdk.MCPServerConfig{Name: name, URL: rawURL, Headers: headers})
+	if err != nil {
+		return err
+	}
+	if registration == nil || !registration.ApprovalRequired || registration.ApprovalID == "" {
+		return errors.New("daemon returned an invalid MCP registration challenge")
+	}
+	_, _ = fmt.Fprintf(r.Out, "MCP server %q requires host approval (challenge %s).\n", name, registration.ApprovalID)
+	return nil
 }
 
 func prepareMCPCommand(command, directory string) (string, string, error) {
@@ -358,7 +406,9 @@ func (r *Runner) confirmMCPApproval(message string) (bool, error) {
 	return answer == answerShortYes || answer == answerYes, nil
 }
 
-func requireMCPApprovalTerminal(input io.Reader) error {
+// requireMCPApprovalTerminal is replaceable in tests; production requires a
+// real interactive terminal before any host-side MCP action.
+var requireMCPApprovalTerminal = func(input io.Reader) error {
 	file, ok := input.(*os.File)
 	if !ok || !term.IsTerminal(int(file.Fd())) {
 		return errors.New("MCP approval requires an interactive terminal; no host action was approved")
