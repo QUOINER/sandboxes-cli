@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ type fakeMCPService struct {
 	list                                    []sdk.MCPServer
 	registerCalls, approvalCalls, callCalls int
 	challenge                               bool
+	registerConfig                          sdk.MCPServerConfig
 }
 
 func (f *fakeMCPService) List(context.Context, string) ([]sdk.MCPServer, error) { return f.list, nil }
@@ -30,8 +32,9 @@ func (f *fakeMCPService) ApproveCall(context.Context, string) (json.RawMessage, 
 	f.approvalCalls++
 	return json.RawMessage(`{"content":[]}`), nil
 }
-func (f *fakeMCPService) Register(context.Context, sdk.MCPServerConfig) (*sdk.MCPRegistration, error) {
+func (f *fakeMCPService) Register(_ context.Context, config sdk.MCPServerConfig) (*sdk.MCPRegistration, error) {
 	f.registerCalls++
+	f.registerConfig = config
 	return &sdk.MCPRegistration{ApprovalID: "registration-1", ApprovalRequired: true}, nil
 }
 func (f *fakeMCPService) ApproveRegistration(context.Context, string) (*sdk.MCPServer, error) {
@@ -151,5 +154,38 @@ func TestPreviousRootCommandContractsRemainReachable(t *testing.T) {
 		if got := runner.Run(context.Background(), tc.args); got != tc.want {
 			t.Errorf("%v exit=%d want %d output=%q", tc.args, got, tc.want, stderr.String())
 		}
+	}
+}
+
+func TestMCPAddRemoteSendsURLAndHeaders(t *testing.T) {
+	original := requireMCPApprovalTerminal
+	requireMCPApprovalTerminal = func(io.Reader) error { return nil }
+	t.Cleanup(func() { requireMCPApprovalTerminal = original })
+	service := &fakeMCPService{}
+	var out, stderr strings.Builder
+	runner := &Runner{Out: &out, Err: &stderr, In: strings.NewReader("yes\n"), NewClient: func(string) (sdk.Client, error) { return mcpFakeClient{mcp: service}, nil }}
+	if code := runner.Run(context.Background(), []string{"mcp", "add", "remote-fixture", "--url", "https://mcp.example.com/mcp", "--header", "X-Team: docs"}); code != 0 {
+		t.Fatalf("add code=%d stderr=%q", code, stderr.String())
+	}
+	if service.registerConfig.Name != "remote-fixture" || service.registerConfig.URL != "https://mcp.example.com/mcp" || service.registerConfig.Headers["X-Team"] != "docs" {
+		t.Fatalf("register config=%+v", service.registerConfig)
+	}
+	if service.registerConfig.Command != "" {
+		t.Fatalf("remote registration carried a command: %+v", service.registerConfig)
+	}
+}
+
+func TestMCPAddRejectsAmbiguousAndSecretRemote(t *testing.T) {
+	original := requireMCPApprovalTerminal
+	requireMCPApprovalTerminal = func(io.Reader) error { return nil }
+	t.Cleanup(func() { requireMCPApprovalTerminal = original })
+	service := &fakeMCPService{}
+	var out, stderr strings.Builder
+	runner := &Runner{Out: &out, Err: &stderr, In: strings.NewReader("yes\n"), NewClient: func(string) (sdk.Client, error) { return mcpFakeClient{mcp: service}, nil }}
+	if code := runner.Run(context.Background(), []string{"mcp", "add", "fixture", "--url", "https://mcp.example.com/mcp", "--command", "/bin/false"}); code != 2 {
+		t.Fatalf("ambiguous add code=%d want 2", code)
+	}
+	if code := runner.Run(context.Background(), []string{"mcp", "add", "fixture", "--url", "https://mcp.example.com/mcp", "--header", "Authorization: Bearer x"}); code != 2 || service.registerCalls != 0 {
+		t.Fatalf("secret header add code=%d register=%d", code, service.registerCalls)
 	}
 }
