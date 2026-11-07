@@ -147,14 +147,14 @@ func (r *Runner) mcpAdd(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintln(r.Err, "usage: rsbx mcp add NAME --command EXECUTABLE [--args ARG] [--dir PATH]")
 		return 2
 	}
+	if err := requireMCPApprovalTerminal(r.In); err != nil {
+		r.error(err)
+		return 1
+	}
 	resolved, resolvedDir, err := prepareMCPCommand(*command, *directory)
 	if err != nil {
 		r.error(err)
 		return 2
-	}
-	if err := requireMCPApprovalTerminal(r.In); err != nil {
-		r.error(err)
-		return 1
 	}
 	client, err := r.client()
 	if err != nil {
