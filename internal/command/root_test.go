@@ -772,6 +772,10 @@ func (f fakeAccountStatus) Status(_ context.Context, provider string) (bool, err
 	return f.statuses[provider], f.err
 }
 
+func (f fakeAccountStatus) StatusDetail(_ context.Context, provider string) (sdk.AccountCredentialStatus, error) {
+	return sdk.AccountCredentialStatus{Present: f.statuses[provider]}, f.err
+}
+
 func (fakeAccounts) Login(_ context.Context, provider string) error {
 	if provider != "docker" && provider != "openai" {
 		return io.ErrUnexpectedEOF

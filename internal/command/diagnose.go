@@ -337,6 +337,15 @@ func (r *Runner) checkAuthentication(ctx context.Context, client sdk.Client) dia
 		return check
 	}
 	check.Status = diagnosePass
+	detail, err := status.StatusDetail(ctx, "docker")
+	if err == nil && detail.RefreshPresent {
+		if detail.RefreshCoordinated {
+			check.Detail = "signed in; token refresh coordinated"
+		} else {
+			check.Detail = "signed in; manual re-login required after token expiry"
+		}
+		return check
+	}
 	check.Detail = "signed in"
 	return check
 }
