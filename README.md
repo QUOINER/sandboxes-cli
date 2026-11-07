@@ -11,6 +11,20 @@ internals. The read-only dashboard uses `github.com/gdamore/tcell/v3` as its
 terminal runtime. Bubble Tea is not used. TUI remains a thin view/input layer;
 non-interactive commands retain stable text and JSON output.
 
+## Install (macOS/Linux, no manual approval)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rheic/sandboxes-cli/main/scripts/install.sh | bash
+```
+
+The installer downloads the release asset for the current OS/architecture,
+verifies it against `SHA256SUMS` and its SLSA build provenance (when `gh` is
+available), ad-hoc signs it on macOS, removes the quarantine attribute so
+Gatekeeper does not prompt, and installs to `~/.local/bin` (override with
+`RSBX_INSTALL_DIR`). Pin a version with `--version vX.Y.Z`; `--file PATH`
+installs a local asset for offline/air-gapped use. Verification can only be
+disabled explicitly with `RSBX_NO_VERIFY=1` for offline testing.
+
 ## Migrating from `qsbx`
 
 The executable is now named `rsbx`. Update scripts, aliases, CI jobs, and
